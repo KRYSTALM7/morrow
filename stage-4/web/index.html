@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Morrow — your money for tomorrow. A clearer view of your wallet and what comes next.">
   <meta name="theme-color" content="#ffffff">
-  <link rel="icon" type="image/png" sizes="512x512" href="/assets/assets/morrow-app-icon.png">
-  <link rel="apple-touch-icon" href="/assets/assets/morrow-app-icon.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/assets/morrow-mark.png">
+  <link rel="apple-touch-icon" href="/assets/assets/morrow-mark.png">
   <title>Morrow — your money for tomorrow</title>
   <link rel="stylesheet" href="/assets/pocketful.css">
   <script src="/assets/pocketful.js" defer></script>
@@ -14,11 +14,14 @@
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo" src="/assets/assets/morrow-logo.png" alt="Morrow — your money for tomorrow"></a>
+    <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Open navigation menu" aria-controls="app-sidebar" aria-expanded="false"><span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></button>
+    <a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo brand-mark" src="/assets/assets/morrow-mark.png" alt=""><span class="brand-copy"><strong>morrow</strong><small>your money for tomorrow</small></span></a>
     <div class="account-nav" id="account-nav"></div>
   </header>
   <div class="app-shell">
-    <aside class="app-sidebar" aria-label="Application navigation">
+    <button class="drawer-overlay" id="drawer-overlay" type="button" aria-label="Close navigation menu" tabindex="-1"></button>
+    <aside class="app-sidebar" id="app-sidebar" aria-label="Application navigation" inert>
+      <button class="drawer-close" id="drawer-close" type="button" aria-label="Close navigation menu">×</button>
       <p class="sidebar-label">Your money</p>
       <nav class="main-nav" aria-label="Main navigation">
         <a href="/" aria-label="Overview">Overview</a>

@@ -4,13 +4,13 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const main = $("#main-content");
   const tokenKey = "pocketful.token";
-  const state = { token: localStorage.getItem(tokenKey), me: null, currency: "EUR", minorUnits: 2 };
+  const state = { token: localStorage.getItem(tokenKey), me: null, currency: "EUR", minorUnits: 2, dashboard: {} };
   let homeReadSequence = 0;
   let requestReadSequence = 0;
   let authorizationReadSequence = 0;
   const requestPayOperations = new Map();
   // Mirrors UI_ROUTES in app.py.
-  const uiRoutes = new Set(["/", "/requests", "/split", "/assistant", "/paypal/return", "/signup", "/login", "/authorizations"]);
+  const uiRoutes = new Set(["/", "/requests", "/split", "/assistant", "/paypal/return", "/signup", "/login", "/authorizations", "/commitments", "/activity"]);
 
   class NetworkFailure extends Error {}
 
@@ -160,6 +160,39 @@
     return element;
   }
 
+  const iconPaths = {
+    overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    requests: '<path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.5-2L20 12M4 12l2.9 5a7 7 0 0 0 11.5-2"/>',
+    split: '<path d="M7 4v6a4 4 0 0 0 4 4h6"/><path d="m14 11 3 3-3 3"/><path d="M7 20v-2"/>',
+    holds: '<path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/>',
+    assistant: '<path d="M12 3a7 7 0 0 0-4 12.7V19h8v-3.3A7 7 0 0 0 12 3Z"/><path d="M9 22h6M9 19h6M12 7v2m-3 2h6"/>',
+    wallet: '<rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18M16 14h2"/><path d="M6 5V3h12v2"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01"/>',
+    people: '<path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 8v6m3-3h-6"/>',
+    activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    forecast: '<path d="M3 3v18h18M7 14l4-4 4 3 6-7"/><path d="M17 6h4v4"/>',
+    pay: '<path d="M12 2v20M17 6.5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    request: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
+    reserve: '<path d="M4 7h16M6 7V4h12v3M6 7v13h12V7M10 11h4"/>',
+    refresh: '<path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 0 2 5"/>',
+    expand: '<path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/>',
+    close: '<path d="m18 6-12 12M6 6l12 12"/>'
+  };
+
+  function icon(name, className = "ui-icon") {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", className);
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.8");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = iconPaths[name] || iconPaths.wallet;
+    return svg;
+  }
+
   function clearMessage(container, testId) {
     const current = $(`[data-testid="${testId}"]`, container);
     if (current) current.remove();
@@ -221,6 +254,65 @@
     }
   }
 
+  function setupMobileNavigation() {
+    const toggle = $("#menu-toggle"), close = $("#drawer-close"), overlay = $("#drawer-overlay"), sidebar = $("#app-sidebar");
+    if (!toggle || !close || !overlay || !sidebar) return;
+    const mobile = window.matchMedia("(max-width: 760px)");
+    const labels = ["Overview", "Requests", "Split bills", "Holds", "Assistant & payments"];
+    const names = ["overview", "requests", "split", "holds", "assistant"];
+    for (const [index, anchor] of [...sidebar.querySelectorAll(".main-nav a")].entries()) {
+      if (!labels[index]) continue;
+      const label = document.createElement("span"); label.className = "nav-label"; label.textContent = labels[index];
+      anchor.replaceChildren(icon(names[index]), label);
+      anchor.setAttribute("aria-label", labels[index]);
+      anchor.title = labels[index];
+    }
+    close.replaceChildren(icon("close"));
+    const syncToggle = () => {
+      const drawerOpen = document.body.classList.contains("nav-open");
+      if (mobile.matches) {
+        toggle.setAttribute("aria-expanded", String(drawerOpen));
+        toggle.setAttribute("aria-label", drawerOpen ? "Close navigation menu" : "Open navigation menu");
+        sidebar.inert = !drawerOpen;
+      } else {
+        const expanded = !document.body.classList.contains("sidebar-collapsed");
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.setAttribute("aria-label", expanded ? "Collapse navigation sidebar" : "Expand navigation sidebar");
+        sidebar.inert = false;
+      }
+    };
+    const setDrawerOpen = (open, restoreFocus = true) => {
+      document.body.classList.toggle("nav-open", open && mobile.matches);
+      syncToggle();
+      if (mobile.matches && open) setTimeout(() => { if (document.body.classList.contains("nav-open")) close.focus(); }, 0);
+      else if (mobile.matches && restoreFocus) toggle.focus();
+    };
+    toggle.addEventListener("click", () => {
+      if (mobile.matches) setDrawerOpen(!document.body.classList.contains("nav-open"));
+      else {
+        document.body.classList.toggle("sidebar-collapsed");
+        syncToggle();
+      }
+    });
+    close.addEventListener("click", () => setDrawerOpen(false));
+    overlay.addEventListener("click", () => setDrawerOpen(false));
+    sidebar.addEventListener("click", event => { if (event.target.closest(".main-nav a")) setDrawerOpen(false, false); });
+    document.addEventListener("keydown", event => {
+      if (!document.body.classList.contains("nav-open")) return;
+      if (event.key === "Escape") { event.preventDefault(); setDrawerOpen(false); return; }
+      if (event.key === "Tab") {
+        const focusable = [...sidebar.querySelectorAll("button:not([disabled]), a[href]")];
+        if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
+        else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+      }
+    });
+    mobile.addEventListener("change", () => {
+      document.body.classList.remove("nav-open");
+      syncToggle();
+    });
+    syncToggle();
+  }
+
   function pageHeading(kicker, title, description) {
     const header = node("header", "page-heading");
     const copy = node("div");
@@ -233,6 +325,159 @@
     const wrap = node("div", "empty-state");
     wrap.append(node("span", "empty-icon", "✦"), node("strong", "", title), node("p", "", detail));
     return wrap;
+  }
+
+  function expandedSection(id, title, iconName) {
+    const section = testNode("section", id, "wallet-detail-section");
+    const heading = node("h3", "wallet-detail-heading");
+    heading.append(icon(iconName), document.createTextNode(title));
+    section.append(heading, testNode("div", `${id}-content`, "wallet-detail-content", "Loading…"));
+    return section;
+  }
+
+  function buildExpandedWalletSections() {
+    const grid = node("div", "wallet-detail-grid");
+    grid.append(expandedSection("wallet-position", "Wallet & this month", "wallet"),
+      expandedSection("wallet-holds", "Open holds", "holds"),
+      expandedSection("wallet-commitments", "Commitments & recurring bills", "calendar"),
+      expandedSection("wallet-shared-expenses", "Shared expenses & reimbursements", "people"),
+      expandedSection("wallet-transactions", "Recent wallet transactions", "activity"),
+      expandedSection("wallet-outlook", "Safe-to-spend & outlook", "forecast"));
+    return grid;
+  }
+
+  function refreshExpandedWallet() {
+    const wallet = $("[data-testid='wallet-card']");
+    if (!wallet || !wallet.classList.contains("wallet-expanded")) return;
+    const expandedSequence = (state.dashboard.expandedSequence || 0) + 1;
+    state.dashboard.expandedSequence = expandedSequence;
+    for (const [endpoint, key] of [["/authorizations?direction=outgoing&status=open&limit=200", "holds"], ["/shared-expenses?status=open&limit=200", "shared"]]) {
+      void api(endpoint).then(result => {
+        if (expandedSequence !== state.dashboard.expandedSequence || !wallet.classList.contains("wallet-expanded")) return;
+        state.dashboard[key] = requireOk(result, `Could not load ${key === "holds" ? "open holds" : "shared expenses"}.`);
+        delete state.dashboard[`${key}Error`];
+        if (key === "holds") renderWalletRecordSummary();
+        renderExpandedWallet();
+      }).catch(error => {
+        if (expandedSequence !== state.dashboard.expandedSequence) return;
+        const label = key === "holds" ? "open holds" : "shared expenses";
+        state.dashboard[`${key}Error`] = error.message ? `Could not load ${label}: ${error.message}` : `Could not load ${label}.`;
+        if (key === "holds") renderWalletRecordSummary();
+        renderExpandedWallet();
+      });
+    }
+    renderExpandedWallet();
+  }
+
+  function renderExpandedWallet() {
+    const root = $(`[data-testid='wallet-expanded-content']`);
+    if (!root) return;
+    const me = state.me || {};
+    const safe = state.dashboard.safe;
+    const position = $(`[data-testid='wallet-position-content']`);
+    position.replaceChildren(outlookRow("Available wallet funds", formatMoney(me.available === undefined ? me.balance : me.available)),
+      outlookRow("Total wallet balance", formatMoney(me.total === undefined ? me.balance : me.total)));
+    const month = state.dashboard.month;
+    if (month && month.complete) {
+      let incoming = 0n, outgoing = 0n;
+      for (const entry of month.entries || []) {
+        const delta = BigInt(String(entry.delta));
+        if (delta > 0n) incoming += delta; else outgoing -= delta;
+      }
+      position.append(outlookRow("Money received this month", formatMoney(incoming.toString())),
+        outlookRow("Money spent this month", formatMoney(outgoing.toString())));
+    } else position.append(node("p", state.dashboard.monthError ? "error-message" : "field-hint",
+      state.dashboard.monthError || "Month-to-date wallet movement is unavailable; the ledger could not be summarized completely."));
+    position.append(node("p", "field-hint", "Morrow shows this wallet only; external bank balances and cash are not included."));
+
+    const holdsContent = $(`[data-testid='wallet-holds-content']`);
+    holdsContent.replaceChildren();
+    if (state.dashboard.holdsError) holdsContent.append(node("p", "error-message", state.dashboard.holdsError));
+    else if (!state.dashboard.holds) holdsContent.append(node("p", "muted", "Loading open holds…"));
+    else {
+      const holds = (state.dashboard.holds.authorizations || []).filter(item => item.status === "open" && item.from_user_id === me.user_id);
+      const countLabel = state.dashboard.holds.has_more ? "200+ open holds" : holds.length === 1 ? "1 open hold" : `${holds.length} open holds`;
+      holdsContent.append(outlookRow(countLabel, formatMoney(me.held || 0)));
+      if (!holds.length) holdsContent.append(node("p", "field-hint", "No active wallet reservations."));
+      for (const hold of holds.slice(0, 4)) holdsContent.append(outlookRow(`${hold.to_handle ? `For ${hold.to_handle}` : "Reservation"}${hold.note ? ` · ${hold.note}` : ""}`,
+        formatMoney(hold.remaining_amount === undefined ? hold.amount : hold.remaining_amount, hold.currency || state.currency)));
+    }
+
+    const commitmentContent = $(`[data-testid='wallet-commitments-content']`);
+    commitmentContent.replaceChildren();
+    if (Number.isInteger(safe && safe.unpaid_commitments_minor)) commitmentContent.append(outlookRow("Commitments due this month", formatMoney(safe.unpaid_commitments_minor)));
+    const commitments = (state.dashboard.commitments || []).filter(item => item.status === "active" && item.next_due_date)
+      .sort((a, b) => String(a.next_due_date).localeCompare(String(b.next_due_date)));
+    if (!state.dashboard.commitments) commitmentContent.append(node("p", state.dashboard.commitmentsError ? "error-message" : "muted",
+      state.dashboard.commitmentsError || "Commitment data is loading."));
+    else if (!commitments.length) commitmentContent.append(node("p", "field-hint", "No upcoming recurring commitments."));
+    else for (const item of commitments.slice(0, 5)) commitmentContent.append(outlookRow(`${item.title} · ${item.next_due_date}`,
+      formatMoney(item.amount_minor, item.currency, state.minorUnits)));
+
+    const sharedContent = $(`[data-testid='wallet-shared-expenses-content']`);
+    sharedContent.replaceChildren();
+    if (state.dashboard.sharedError) sharedContent.append(node("p", "error-message", state.dashboard.sharedError));
+    else if (!state.dashboard.shared) sharedContent.append(node("p", "muted", "Loading shared expenses…"));
+    else {
+      const expenses = state.dashboard.shared.expenses || [];
+      if (state.dashboard.shared.has_more) sharedContent.append(node("p", "field-hint", "There are more than 200 open expenses; the outstanding total is not summarized here."));
+      else {
+        const receivable = expenses.reduce((sum, item) => sum + BigInt(String(item.outstanding_receivable_minor || 0)), 0n);
+        sharedContent.append(outlookRow("Reimbursements outstanding (receivable)", formatMoney(receivable.toString())));
+      }
+      sharedContent.append(node("p", "field-hint", "Receivables are not wallet cash and are excluded from available and Safe-to-Spend balances."));
+      if (!expenses.length) sharedContent.append(node("p", "field-hint", "No open shared expenses."));
+      for (const expense of expenses.slice(0, 4)) sharedContent.append(outlookRow(expense.description || "Shared expense",
+        formatMoney(expense.outstanding_receivable_minor || 0, expense.currency || state.currency)));
+    }
+    const requests = state.dashboard.requests || [];
+    if (!state.dashboard.requests) sharedContent.append(node("p", state.dashboard.requestsError ? "error-message" : "muted",
+      state.dashboard.requestsError || "Open P2P request data is loading."));
+    else if (state.dashboard.requestsComplete === false) sharedContent.append(node("p", "field-hint", "More than 2,000 open requests; owed and receivable totals are not summarized here."));
+    else if (state.dashboard.requests) {
+      const owed = requests.filter(item => item.status === "pending" && item.payer_id === me.user_id)
+        .reduce((sum, item) => sum + BigInt(String(item.amount)), 0n);
+      const toReceive = requests.filter(item => item.status === "pending" && item.requester_id === me.user_id)
+        .reduce((sum, item) => sum + BigInt(String(item.amount)), 0n);
+      sharedContent.append(outlookRow("Open P2P requests owed", formatMoney(owed.toString())),
+        outlookRow("Open P2P requests to receive", formatMoney(toReceive.toString())));
+    }
+
+    const activityContent = $(`[data-testid='wallet-transactions-content']`);
+    activityContent.replaceChildren();
+    const activity = state.dashboard.activity;
+    if (!activity) activityContent.append(node("p", state.dashboard.activityError ? "error-message" : "muted",
+      state.dashboard.activityError || "Recent wallet activity is loading."));
+    else if (!activity.length) activityContent.append(node("p", "field-hint", "No wallet transactions yet."));
+    else for (const payment of activity.slice(0, 5)) {
+      const received = payment.to_user_id === me.user_id;
+      const peer = received ? payment.from_handle : payment.to_handle;
+      const date = new Date(payment.created_at);
+      const day = Number.isNaN(date.getTime()) ? "Date unavailable" : new Intl.DateTimeFormat(undefined, {month: "short", day: "numeric"}).format(date);
+      activityContent.append(outlookRow(`${received ? "Received from" : "Paid"} ${peer} · ${day}`,
+        formatMoney(payment.amount, payment.currency || state.currency)));
+    }
+
+    const outlook = $(`[data-testid='wallet-outlook-content']`);
+    outlook.replaceChildren();
+    if (!safe) outlook.append(node("p", state.dashboard.safeError ? "error-message" : "muted",
+      state.dashboard.safeError || "Financial outlook is loading."));
+    else {
+      outlook.append(node("span", safe.status === "available" ? "status-pill status-completed" : "status-pill status-unavailable",
+        safe.status === "available" ? `${safe.confidence} confidence` : "Safe-to-Spend unavailable"));
+      if (safe.status === "available") {
+        outlook.append(outlookRow("Safe-to-Spend", formatMoney(safe.safe_to_spend_minor)),
+          outlookRow("Remaining variable spend forecast", formatMoney(safe.forecast_remaining_variable_spend_minor)));
+        if (safe.forecast_range_minor) outlook.append(outlookRow("Forecast range",
+          `${formatMoney(safe.forecast_range_minor.low)} – ${formatMoney(safe.forecast_range_minor.high)}`));
+      } else outlook.append(node("p", "field-hint", `No amount shown. ${formatForecastReasons(safe.unavailable_reasons || [])}`));
+      outlook.append(node("p", "field-hint", `Calculated from Morrow wallet history only · ${safe.calculation_date}.`));
+      const details = document.createElement("details"); details.className = "forecast-assumptions";
+      details.append(node("summary", "", "Calculation assumptions"));
+      const list = node("ul");
+      for (const assumption of safe.assumptions || []) list.append(node("li", "", assumption));
+      details.append(list); outlook.append(details);
+    }
   }
 
   function loadingState(testId, text) {
@@ -302,21 +547,38 @@
       return;
     }
     document.body.classList.remove("is-public", "is-landing");
-    main.replaceChildren(pageHeading("Your overview", `Good to see you, ${state.me.display_name}.`, "Your wallet activity and the money actions Morrow can support today."));
-    const grid = node("div", "layout-grid");
-    const left = node("div", "stack");
+    const firstName = String(state.me.display_name || "there").trim().split(/\s+/)[0];
+    const heading = pageHeading("Overview", `Good morning, ${firstName}.`, "Here's where your money stands today.");
+    heading.classList.add("dashboard-heading");
+    main.replaceChildren(heading);
+    const dashboard = node("div", "dashboard-overview");
     const wallet = testNode("section", "wallet-card", "panel wallet-hero");
     wallet.setAttribute("aria-label", "Wallet balance");
+    wallet.setAttribute("role", "group");
+    wallet.tabIndex = 0;
     const walletTop = node("div", "activity-top");
     const walletCopy = node("div");
-    walletCopy.append(node("p", "eyebrow", "Ready when you are"));
+    walletCopy.append(node("p", "eyebrow", "Wallet overview"));
     const available = testNode("strong", "wallet-available", "", "—");
     available.setAttribute("data-amount", "0");
     available.setAttribute("aria-label", "Available balance");
     walletCopy.append(available, node("p", "currency-caption", "Available to spend"));
-    const refresh = testNode("button", "wallet-refresh", "wallet-refresh", "↻ Refresh");
+    const refresh = testNode("button", "wallet-refresh", "wallet-refresh", "Refresh");
     refresh.type = "button";
-    walletTop.append(walletCopy, refresh);
+    refresh.prepend(icon("refresh"));
+    const toggleWallet = testNode("button", "wallet-toggle", "wallet-toggle");
+    toggleWallet.type = "button";
+    toggleWallet.setAttribute("aria-expanded", "false");
+    toggleWallet.setAttribute("aria-controls", "wallet-expanded-content");
+    toggleWallet.setAttribute("aria-label", "View full financial picture");
+    const toggleLabel = (desktop, mobile) => {
+      const longLabel = node("span", "wallet-toggle-desktop", desktop);
+      const shortLabel = node("span", "wallet-toggle-mobile", mobile);
+      return [longLabel, shortLabel];
+    };
+    toggleWallet.append(icon("expand"), ...toggleLabel("View full financial picture", "View full picture"));
+    const walletTools = node("div", "wallet-tools"); walletTools.append(refresh, toggleWallet);
+    walletTop.append(walletCopy, walletTools);
     const breakdown = node("div", "wallet-breakdown");
     const totalStat = node("div", "wallet-stat");
     totalStat.append(node("span", "", "Total balance"));
@@ -331,98 +593,105 @@
     const safeExplanation = testNode("p", "safe-to-spend-explanation", "", "Waiting for forecast inputs.");
     safeSpend.append(node("span", "safe-spend-label", "Safe to spend"), safeBadge,
       safeValue, safeExplanation);
-    wallet.append(walletTop, breakdown, safeSpend);
+    const walletRecords = testNode("p", "wallet-records-summary", "wallet-records-summary", "Commitments due this month — · Open holds —");
+    const expandedClip = node("div", "wallet-expanded-clip");
+    const expanded = testNode("div", "wallet-expanded-content", "wallet-expanded-content");
+    expanded.id = "wallet-expanded-content";
+    expanded.setAttribute("aria-hidden", "true");
+    expanded.inert = true;
+    expanded.append(buildExpandedWalletSections());
+    expandedClip.append(expanded);
+    wallet.append(walletTop, breakdown, safeSpend, walletRecords, expandedClip);
     refresh.addEventListener("click", () => { void refreshHome(); });
+    const setWalletExpanded = open => {
+      wallet.classList.toggle("wallet-expanded", open);
+      dashboard.classList.toggle("wallet-expanded", open);
+      toggleWallet.setAttribute("aria-expanded", String(open));
+      toggleWallet.setAttribute("aria-label", open ? "Collapse financial picture" : "View full financial picture");
+      toggleWallet.replaceChildren(icon(open ? "close" : "expand"), ...toggleLabel(
+        open ? "Collapse financial picture" : "View full financial picture", open ? "Collapse wallet" : "View full picture"));
+      expanded.setAttribute("aria-hidden", String(!open));
+      expanded.inert = !open;
+      if (open) void refreshExpandedWallet();
+    };
+    toggleWallet.addEventListener("click", event => {
+      event.stopPropagation();
+      setWalletExpanded(toggleWallet.getAttribute("aria-expanded") !== "true");
+    });
+    wallet.addEventListener("click", event => {
+      if (!wallet.classList.contains("wallet-expanded") && !event.target.closest("button, a")) setWalletExpanded(true);
+    });
+    wallet.addEventListener("keydown", event => {
+      if (event.target !== wallet || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault(); setWalletExpanded(!wallet.classList.contains("wallet-expanded"));
+    });
     const homeError = node("div", "notice-list"); homeError.id = "home-notices";
-    const activityPanel = node("section", "panel");
-    activityPanel.append(panelHeading("Recent activity", "The latest payments visible to you."));
-    const activityRegion = node("div"); activityRegion.id = "activity-region";
-    activityRegion.setAttribute("aria-live", "polite");
-    activityRegion.setAttribute("aria-busy", "true");
-    const initialActivityLoading = loadingState("activity-loading", "Loading your recent wallet activity…");
-    initialActivityLoading.hidden = false;
-    activityRegion.append(initialActivityLoading);
-    activityPanel.append(activityRegion);
     const monthFlow = node("section", "dashboard-stat-grid");
     monthFlow.setAttribute("aria-label", "Wallet movement this month");
     monthFlow.append(createDashboardMetric("month-in", "Money in · month to date", "—", "Wallet credits, including P2P and refunds."),
       createDashboardMetric("month-out", "Money out · month to date", "—", "Wallet debits, including P2P payments."));
-    left.append(wallet, homeError, monthFlow, activityPanel);
-
-    const right = node("div", "stack");
-    const commitments = node("section", "panel overview-card");
-    commitments.append(panelHeading("Recurring commitments", "Bills and subscriptions due soon."));
-    commitments.append(testNode("div", "commitments-overview-content", "outlook-content", "Loading commitment totals…"));
-    commitments.dataset.testid = "commitments-overview";
-    const shared = node("section", "panel overview-card");
-    shared.append(panelHeading("Open P2P requests", "Amounts from the existing Requests feature."));
+    const summaryGrid = node("div", "dashboard-summary-grid");
+    const commitmentsSummary = node("section", "dashboard-summary");
+    commitmentsSummary.dataset.testid = "commitments-overview";
+    commitmentsSummary.append(node("h2", "", "Upcoming commitments"),
+      testNode("div", "commitments-overview-content", "outlook-content", "Loading commitments…"));
+    const commitmentLink = node("a", "text-link", "View commitments →"); commitmentLink.href = "/commitments";
+    commitmentsSummary.append(commitmentLink);
+    const shared = node("section", "dashboard-summary");
+    shared.dataset.testid = "shared-expenses-overview";
+    shared.append(node("h2", "", "Shared expenses & requests"));
     const sharedRows = testNode("div", "shared-request-summary", "shared-request-summary");
     sharedRows.setAttribute("aria-live", "polite");
     sharedRows.append(node("p", "muted", "Loading open requests…"));
-    shared.append(sharedRows,
-      node("p", "field-hint", "Requests are shown as requested. Shared-expense shares and reimbursements aren’t consolidated."));
-    const reviewRequests = node("a", "secondary-button", "Review requests"); reviewRequests.href = "/requests";
-    const splitBill = node("a", "quiet-button", "Split a bill"); splitBill.href = "/split";
-    const sharedActions = node("div", "row-actions"); sharedActions.append(reviewRequests, splitBill); shared.append(sharedActions);
-    shared.dataset.testid = "shared-expenses-overview";
-    const forecast = node("section", "panel overview-card");
-    forecast.append(panelHeading("Month-end outlook", "Forecast and variable-spend trends."));
+    shared.append(sharedRows, node("p", "field-hint", "Reimbursements stay separate from wallet funds; see the full financial picture for details."));
+    const sharedLink = node("a", "text-link", "Review requests & splits →"); sharedLink.href = "/requests";
+    shared.append(sharedLink);
+    summaryGrid.append(commitmentsSummary, shared);
+
+    const quickActions = node("section", "dashboard-quick-actions");
+    quickActions.append(node("h2", "", "Quick actions"));
+    const quickLinks = node("div", "quick-action-links");
+    for (const [label, action, note] of [["Pay", "pay-form", "Send a payment"], ["Request", "request-form", "Ask for money"], ["Reserve", "authorize-form", "Set money aside"]]) {
+      const link = node("a", "quick-action-link");
+      link.href = `/assistant#${action}`;
+      link.setAttribute("aria-label", `${label}: ${note}`);
+      const iconName = label === "Pay" ? "pay" : label === "Request" ? "request" : "reserve";
+      link.append(icon(iconName), node("span", "quick-action-copy"));
+      link.lastElementChild.append(node("strong", "", label), node("small", "", note));
+      quickLinks.append(link);
+    }
+    quickActions.append(quickLinks);
+
+    const lower = node("div", "dashboard-lower");
+    const commitments = node("section", "dashboard-preview");
+    commitments.id = "upcoming-commitments-preview";
+    commitments.append(node("div", "preview-heading", "Upcoming commitments"));
+    commitments.append(testNode("div", "commitments-preview-content", "preview-list", "Loading commitments…"));
+    const commitmentsMore = node("a", "text-link", "All commitments →"); commitmentsMore.href = "/commitments";
+    commitments.append(commitmentsMore);
+    const activityPanel = node("section", "dashboard-preview");
+    activityPanel.id = "recent-activity-preview";
+    activityPanel.append(node("div", "preview-heading", "Recent activity"));
+    const activityRegion = node("div", "activity-preview-list"); activityRegion.id = "activity-region";
+    activityRegion.setAttribute("aria-live", "polite"); activityRegion.setAttribute("aria-busy", "true");
+    const initialActivityLoading = loadingState("activity-loading", "Loading activity…"); initialActivityLoading.hidden = false;
+    activityRegion.append(initialActivityLoading); activityPanel.append(activityRegion);
+    const activityMore = node("a", "text-link", "All activity →"); activityMore.href = "/activity"; activityPanel.append(activityMore);
+    const forecast = node("section", "dashboard-preview");
+    forecast.id = "financial-outlook-preview";
+    forecast.append(node("div", "preview-heading", "Financial outlook"));
     const outlook = testNode("div", "forecast-overview-content", "outlook-content", "Loading forecast data…");
     outlook.setAttribute("aria-live", "polite");
     forecast.append(outlook);
-    const settingsForm = document.createElement("form");
-    settingsForm.className = "form-grid forecast-settings-form";
-    settingsForm.dataset.testid = "forecast-settings-form";
-    const savingsField = field("Monthly savings target", "forecast-savings-target", "text", "0.00");
-    savingsField.input.inputMode = "decimal";
-    savingsField.input.setAttribute("aria-describedby", "forecast-savings-hint");
-    const bufferField = field("Safety buffer", "forecast-safety-buffer", "text", "0.00");
-    bufferField.input.inputMode = "decimal";
-    const settingsHint = node("p", "field-hint", "These are reserved amounts, not transactions.");
-    settingsHint.id = "forecast-savings-hint";
-    bufferField.input.setAttribute("aria-describedby", "forecast-savings-hint");
-    settingsForm.append(savingsField.wrap, bufferField.wrap, settingsHint);
-    const settingsFeedback = node("div", "forecast-settings-feedback");
-    const settingsSave = testNode("button", "forecast-settings-save", "secondary-button", "Save targets");
-    settingsSave.type = "submit";
-    settingsForm.append(settingsSave, settingsFeedback);
-    const settingsTracker = operationTracker();
-    for (const input of [savingsField.input, bufferField.input]) {
-      input.addEventListener("input", () => {
-        settingsTracker.changed();
-        input.dataset.edited = "true";
-      });
-    }
-    settingsForm.addEventListener("submit", async event => {
-      event.preventDefault();
-      clearMessage(settingsFeedback, "forecast-settings-error");
-      clearMessage(settingsFeedback, "forecast-settings-success");
-      const savings = parseNonNegativeMoney(savingsField.input.value);
-      const buffer = parseNonNegativeMoney(bufferField.input.value);
-      if (savings === null || buffer === null) {
-        showMessage(settingsFeedback, "forecast-settings-error",
-          `Enter non-negative amounts with no more than ${state.minorUnits} decimal places.`);
-        return;
-      }
-      const body = {savings_target_minor: savings, safety_buffer_minor: buffer};
-      settingsSave.disabled = true;
-      try {
-        const response = requireOk(await api("/forecast/settings", {
-          method: "PATCH", body, key: settingsTracker.forBody(body)
-        }), "Could not save your forecast targets.");
-        savingsField.input.value = decimalInput(response.savings_target_minor);
-        bufferField.input.value = decimalInput(response.safety_buffer_minor);
-        delete savingsField.input.dataset.edited;
-        delete bufferField.input.dataset.edited;
-        showMessage(settingsFeedback, "forecast-settings-success", "Forecast targets saved.", "success-message");
-        void refreshHome();
-      } catch (error) {
-        showMessage(settingsFeedback, "forecast-settings-error", error.message || "Could not save your forecast targets.");
-      } finally { settingsSave.disabled = false; }
-    });
-    forecast.append(settingsForm);
-    forecast.dataset.testid = "forecast-overview";
-    right.append(commitments, shared, forecast);
+    const forecastMore = node("a", "text-link", "Full outlook & settings →"); forecastMore.href = "/assistant#financial-outlook";
+    forecast.append(forecastMore);
+    lower.append(commitments, activityPanel, forecast);
+    dashboard.append(wallet, monthFlow, quickActions, summaryGrid, lower, homeError);
+    main.append(dashboard);
+    void refreshHome();
+  }
+
+  function buildMoneyActionForms() {
     const pay = makeNavForm("Send a payment", "A little note makes it feel personal.", "pay-form", "pay-submit", "Send payment");
     const payTo = field("Pay who?", "pay-handle", "text", "Their handle");
     payTo.input.autocapitalize = "none"; payTo.input.autocomplete = "off";
@@ -482,15 +751,67 @@
       const key = authorizeTracker.forBody(body);
       await runMoneyAction(authorize, async () => requireOk(await api("/authorizations", { method: "POST", body, key }), "Hold was not created."), "authorize-error", null, "Money reserved.");
     });
-    right.append(pay.panel, request.panel, authorize.panel);
-    grid.append(left, right); main.append(grid);
-    void refreshHome();
+    return {pay: pay.panel, request: request.panel, reserve: authorize.panel};
+  }
+
+  function buildForecastSettingsForm() {
+    const settingsForm = document.createElement("form");
+    settingsForm.className = "form-grid forecast-settings-form";
+    settingsForm.dataset.testid = "forecast-settings-form";
+    const savingsField = field("Monthly savings target", "forecast-savings-target", "text", "0.00");
+    savingsField.input.inputMode = "decimal";
+    savingsField.input.setAttribute("aria-describedby", "forecast-savings-hint");
+    const bufferField = field("Safety buffer", "forecast-safety-buffer", "text", "0.00");
+    bufferField.input.inputMode = "decimal";
+    const settingsHint = node("p", "field-hint", "These are reserved amounts, not transactions.");
+    settingsHint.id = "forecast-savings-hint";
+    bufferField.input.setAttribute("aria-describedby", "forecast-savings-hint");
+    settingsForm.append(savingsField.wrap, bufferField.wrap, settingsHint);
+    const settingsFeedback = node("div", "forecast-settings-feedback");
+    const settingsSave = testNode("button", "forecast-settings-save", "secondary-button", "Save targets");
+    settingsSave.type = "submit";
+    settingsForm.append(settingsSave, settingsFeedback);
+    const settingsTracker = operationTracker();
+    for (const input of [savingsField.input, bufferField.input]) {
+      input.addEventListener("input", () => {
+        settingsTracker.changed();
+        input.dataset.edited = "true";
+      });
+    }
+    settingsForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      clearMessage(settingsFeedback, "forecast-settings-error");
+      clearMessage(settingsFeedback, "forecast-settings-success");
+      const savings = parseNonNegativeMoney(savingsField.input.value);
+      const buffer = parseNonNegativeMoney(bufferField.input.value);
+      if (savings === null || buffer === null) {
+        showMessage(settingsFeedback, "forecast-settings-error",
+          `Enter non-negative amounts with no more than ${state.minorUnits} decimal places.`);
+        return;
+      }
+      const body = {savings_target_minor: savings, safety_buffer_minor: buffer};
+      settingsSave.disabled = true;
+      try {
+        const response = requireOk(await api("/forecast/settings", {
+          method: "PATCH", body, key: settingsTracker.forBody(body)
+        }), "Could not save your forecast targets.");
+        savingsField.input.value = decimalInput(response.savings_target_minor);
+        bufferField.input.value = decimalInput(response.safety_buffer_minor);
+        delete savingsField.input.dataset.edited;
+        delete bufferField.input.dataset.edited;
+        showMessage(settingsFeedback, "forecast-settings-success", "Forecast targets saved.", "success-message");
+        void refreshHome();
+      } catch (error) {
+        showMessage(settingsFeedback, "forecast-settings-error", error.message || "Could not save your forecast targets.");
+      } finally { settingsSave.disabled = false; }
+    });
+    return settingsForm;
   }
 
   function setupLandingWalletStory() {
     const stage = $(".wallet-stage", main);
     const scenes = [...main.querySelectorAll("[data-wallet-scene]")];
-    if (!stage || !scenes.length || typeof window.IntersectionObserver !== "function" || window.matchMedia("(max-width: 860px)").matches) return;
+    if (!stage || !scenes.length || typeof window.IntersectionObserver !== "function" || window.matchMedia("(max-width: 860px)").matches || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     document.documentElement.classList.add("landing-enhanced");
     const labels = ["Wallet overview", "Available funds", "Upcoming commitments", "Shared expenses", "Financial outlook"];
     const observer = new IntersectionObserver(() => {
@@ -560,11 +881,22 @@
     region.setAttribute("aria-busy", "true");
     const outcomes = await Promise.allSettled([
       api("/me"), readPersonalActivity(state.me && state.me.user_id), readMonthFlow(),
-      readOpenRequests()
+      readOpenRequests(), api("/commitments?status=active&limit=50")
     ]);
     if (sequence !== homeReadSequence) return;
 
-    const [meOutcome, activityOutcome, monthOutcome, requestsOutcome] = outcomes;
+    const [meOutcome, activityOutcome, monthOutcome, requestsOutcome, commitmentsOutcome] = outcomes;
+    state.dashboard.activity = activityOutcome.status === "fulfilled" ? activityOutcome.value : null;
+    state.dashboard.activityError = activityOutcome.status === "rejected" ? activityOutcome.reason.message || "Could not load recent wallet activity." : "";
+    state.dashboard.month = monthOutcome.status === "fulfilled" ? monthOutcome.value : null;
+    state.dashboard.monthError = monthOutcome.status === "rejected" ? monthOutcome.reason.message || "Could not summarize wallet movement." : "";
+    state.dashboard.requests = requestsOutcome.status === "fulfilled" ? requestsOutcome.value.requests || [] : null;
+    state.dashboard.requestsComplete = requestsOutcome.status === "fulfilled" ? requestsOutcome.value.complete : null;
+    state.dashboard.requestsError = requestsOutcome.status === "rejected" ? requestsOutcome.reason.message || "Could not load open requests." : "";
+    state.dashboard.commitments = commitmentsOutcome.status === "fulfilled" && commitmentsOutcome.value.response.ok
+      ? commitmentsOutcome.value.data.commitments || [] : null;
+    state.dashboard.commitmentsError = commitmentsOutcome.status === "rejected" ? commitmentsOutcome.reason.message
+      : commitmentsOutcome.status === "fulfilled" && !commitmentsOutcome.value.response.ok ? "Could not load recurring commitments." : "";
     let hasError = false;
     if (meOutcome.status === "fulfilled" && meOutcome.value.response.ok) {
       const me = meOutcome.value.data;
@@ -619,22 +951,36 @@
       const message = requestsOutcome.status === "rejected" ? requestsOutcome.reason.message : "Could not identify this wallet.";
       requestsRegion.replaceChildren(node("p", "error-message", message || "Could not load open requests."));
     }
+    if (commitmentsOutcome.status === "fulfilled" && commitmentsOutcome.value.response.ok) {
+      renderCommitmentsPreview(commitmentsOutcome.value.data.commitments || []);
+    } else {
+      const preview = $(`[data-testid='commitments-preview-content']`);
+      if (preview) preview.replaceChildren(node("p", "muted", "Commitments could not be loaded."));
+    }
+    renderWalletRecordSummary();
     if (hasError && !$("[data-testid='home-error']", notices)) {
       showMessage(notices, "home-error", "Some dashboard information could not be refreshed. Retry from the wallet card.");
     }
     void api("/safe-to-spend").then(result => {
       if (sequence !== homeReadSequence) return;
-      if (result.response.ok) renderFinancialOutlook(result.data);
+      if (result.response.ok) { state.dashboard.safe = result.data; state.dashboard.safeError = ""; renderFinancialOutlook(result.data); renderWalletRecordSummary(); }
       else {
         const message = messageOf(result, "Could not calculate your forecast.");
+        state.dashboard.safe = null;
+        state.dashboard.safeError = message;
         renderFinancialOutlook(null, message);
+      renderWalletRecordSummary();
         showMessage(notices, "home-error", message);
       }
     }).catch(error => {
       if (sequence !== homeReadSequence) return;
+      state.dashboard.safe = null;
+      state.dashboard.safeError = error.message || "Could not calculate your forecast.";
       renderFinancialOutlook(null, error.message || "Could not calculate your forecast.");
+      renderWalletRecordSummary();
       showMessage(notices, "home-error", error.message || "Could not calculate your forecast.");
     });
+    if ($("[data-testid='wallet-card']")?.classList.contains("wallet-expanded")) renderExpandedWallet();
   }
 
   function renderFinancialOutlook(result, failureMessage = "") {
@@ -648,9 +994,10 @@
       badge.className = "status-pill status-unavailable";
       badge.textContent = "Unavailable";
       value.textContent = "Unavailable";
+      value.hidden = true;
       explanation.textContent = failureMessage || "Forecast inputs could not be loaded.";
-      commitmentRegion.replaceChildren(node("p", "error-message", "Commitment totals could not be loaded."));
       forecastRegion.replaceChildren(node("p", "error-message", failureMessage || "Forecast inputs could not be loaded."));
+      if ($("[data-testid='wallet-card']")?.classList.contains("wallet-expanded")) renderExpandedWallet();
       return;
     }
 
@@ -666,58 +1013,80 @@
     badge.className = available ? "status-pill status-completed" : "status-pill status-unavailable";
     badge.textContent = available ? `${result.confidence} confidence` : "Unavailable";
     value.textContent = available ? formatMoney(result.safe_to_spend_minor) : "Unavailable";
+    value.hidden = !available;
     const historyMonths = result.data_coverage && result.data_coverage.history_months || 0;
     explanation.textContent = available
       ? `Calculated ${result.calculation_date} · ${historyMonths} complete history months · available funds already reflect holds.`
       : `No safe-to-spend amount shown. ${formatForecastReasons(result.unavailable_reasons || [])}`;
 
-    commitmentRegion.replaceChildren();
-    if (Number.isInteger(result.unpaid_commitments_minor)) {
-      commitmentRegion.append(node("p", "outlook-total",
-        `Unpaid through ${result.period_end}: ${formatMoney(result.unpaid_commitments_minor)}`));
-      for (const item of result.commitment_category_breakdown || []) {
-        commitmentRegion.append(outlookRow(item.category, formatMoney(item.amount_minor)));
-      }
-      if (!result.commitment_category_breakdown || !result.commitment_category_breakdown.length) {
-        commitmentRegion.append(node("p", "field-hint", "No active unpaid commitments are due this month."));
-      }
-    } else {
-      commitmentRegion.append(node("p", "muted", "Commitment totals are unavailable."));
-    }
-
     forecastRegion.replaceChildren();
-    forecastRegion.append(node("p", "field-hint",
-      `Calculation date ${result.calculation_date} · period ${result.period_start} to ${result.period_end}.`));
     if (!available) {
       forecastRegion.append(node("span", "status-pill status-unavailable", "History coverage incomplete"),
         node("p", "", formatForecastReasons(result.unavailable_reasons || [])));
     } else {
       const range = result.forecast_range_minor;
-      const monthEnd = result.estimated_month_end_balance_range_minor;
       forecastRegion.append(outlookRow("Remaining variable spend",
         formatMoney(result.forecast_remaining_variable_spend_minor)));
-      forecastRegion.append(outlookRow("Estimate range",
-        `${formatMoney(range.low)} – ${formatMoney(range.high)}`));
-      forecastRegion.append(outlookRow("Estimated month-end balance",
-        `${formatMoney(monthEnd.low)} – ${formatMoney(monthEnd.high)}`));
-      const categoryState = result.data_coverage.variable_category_status;
-      forecastRegion.append(node("p", "field-hint", categoryState === "available"
-        ? "Variable outflow categories are based on categorized wallet transactions."
-        : "Variable spending has no category breakdown because wallet transactions are uncategorized."));
-      for (const item of result.variable_category_breakdown || []) {
-        forecastRegion.append(outlookRow(item.category, formatMoney(item.monthly_median_minor)));
-      }
+      forecastRegion.append(outlookRow("Forecast range", `${formatMoney(range.low)} – ${formatMoney(range.high)}`));
     }
-    const details = document.createElement("details");
-    details.className = "forecast-assumptions";
-    details.append(node("summary", "", "Calculation assumptions"));
-    const list = document.createElement("ul");
-    for (const assumption of result.assumptions || []) list.append(node("li", "", assumption));
-    if (result.data_coverage && result.data_coverage.variable_category_reason) {
-      list.append(node("li", "", "Transaction categories are not available in this wallet ledger."));
+    forecastRegion.append(node("p", "field-hint", `Updated ${result.calculation_date}.`));
+    if ($("[data-testid='wallet-card']")?.classList.contains("wallet-expanded")) renderExpandedWallet();
+  }
+
+  function renderWalletRecordSummary() {
+    const summary = $(`[data-testid='wallet-records-summary']`);
+    if (!summary) return;
+    const unpaid = state.dashboard.safe && Number.isInteger(state.dashboard.safe.unpaid_commitments_minor)
+      ? formatMoney(state.dashboard.safe.unpaid_commitments_minor) : "Unavailable";
+    const holds = state.dashboard.holds && state.dashboard.holds.authorizations
+      ? (state.dashboard.holds.authorizations.filter(item => item.status === "open" && item.from_user_id === (state.me && state.me.user_id)).length)
+      : null;
+    const held = state.me ? formatMoney(state.me.held || 0) : "Unavailable";
+    summary.textContent = `Commitments due this month ${unpaid} · Open holds ${holds === null ? `${held} reserved` : `${holds} (${held})`}`;
+  }
+
+  function renderCommitmentsPreview(items) {
+    const summary = $(`[data-testid='commitments-overview-content']`);
+    const preview = $(`[data-testid='commitments-preview-content']`);
+    const active = items.filter(item => item.status === "active");
+    const upcoming = active.filter(item => item.next_due_date)
+      .sort((a, b) => String(a.next_due_date).localeCompare(String(b.next_due_date)));
+    if (summary) summary.textContent = active.length === 1 ? "1 active commitment" : `${active.length} active commitments`;
+    if (!preview) return;
+    preview.replaceChildren();
+    if (!upcoming.length) {
+      preview.append(emptyState("No upcoming commitments", "Add or review recurring bills when you’re ready."));
+      return;
     }
-    details.append(list);
-    forecastRegion.append(details);
+    for (const item of upcoming.slice(0, 3)) {
+      const row = node("div", "commitment-preview-row");
+      row.append(node("span", "", item.title), node("time", "", item.next_due_date),
+        node("strong", "", formatMoney(item.amount_minor, item.currency, state.minorUnits)));
+      preview.append(row);
+    }
+  }
+
+  function renderFullOutlook(container, result) {
+    container.replaceChildren();
+    const available = result.status === "available";
+    container.append(node("span", available ? "status-pill status-completed" : "status-pill status-unavailable",
+      available ? `${result.confidence} confidence` : "Safe-to-Spend unavailable"));
+    if (!available) {
+      container.append(node("p", "", `No safe-to-spend amount shown. ${formatForecastReasons(result.unavailable_reasons || [])}`));
+    } else {
+      container.append(outlookRow("Safe-to-Spend", formatMoney(result.safe_to_spend_minor)));
+      container.append(outlookRow("Commitments due this month", formatMoney(result.unpaid_commitments_minor)));
+      container.append(outlookRow("Remaining variable spend", formatMoney(result.forecast_remaining_variable_spend_minor)));
+      const range = result.forecast_range_minor;
+      container.append(outlookRow("Forecast range", `${formatMoney(range.low)} – ${formatMoney(range.high)}`));
+    }
+    container.append(node("p", "field-hint", `Based on Morrow wallet history; updated ${result.calculation_date}.`));
+    const assumptions = document.createElement("details"); assumptions.className = "forecast-assumptions";
+    assumptions.append(node("summary", "", "How this estimate is calculated"));
+    const list = node("ul");
+    for (const note of result.assumptions || []) list.append(node("li", "", note));
+    if (result.data_coverage && result.data_coverage.variable_category_reason) list.append(node("li", "", result.data_coverage.variable_category_reason));
+    assumptions.append(list); container.append(assumptions);
   }
 
   function outlookRow(label, amount) {
@@ -1158,7 +1527,7 @@
     const signup = mode === "signup";
     const panel = node("section", "panel auth-card");
     const logo = node("div", "auth-brand");
-    logo.innerHTML = '<a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo" src="/assets/assets/morrow-logo.png" alt="Morrow — your money for tomorrow"></a>';
+    logo.innerHTML = '<a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo brand-mark" src="/assets/assets/morrow-mark.png" alt=""><span class="brand-copy"><strong>morrow</strong><small>your money for tomorrow</small></span></a>';
     panel.append(logo, node("p", "eyebrow auth-eyebrow", signup ? "A fresh start" : "Welcome back"), node("h1", "", signup ? "Create your account" : "Good to have you back"), node("p", "lede auth-lede", signup ? "Build a clearer picture of your money, one step at a time." : "Sign in to see your wallet and what comes next."));
     const form = document.createElement("form"); form.className = "form-grid auth-form"; form.noValidate = true;
     const feedback = node("div", "notice-list auth-feedback");
@@ -1286,6 +1655,7 @@
   }
 
   async function init() {
+    setupMobileNavigation();
     document.body.classList.remove("is-public", "is-landing");
     setCurrentNavigation();
     if (state.token) {
@@ -1304,12 +1674,64 @@
     else if (path === "/split") state.me ? buildSplit() : buildSignedOut("split");
     else if (path === "/assistant") state.me ? buildAssistant() : buildSignedOut("assistant");
     else if (path === "/authorizations") state.me ? buildAuthorizations() : buildSignedOut("authorizations");
+    else if (path === "/commitments") state.me ? buildCommitments() : buildSignedOut("commitments");
+    else if (path === "/activity") state.me ? buildActivityPage() : buildSignedOut("activity");
     else buildHome();
   }
 
+  function buildCommitments() {
+    main.replaceChildren(pageHeading("Planning", "Upcoming commitments.", "Review recurring bills and their next due dates."));
+    const region = node("section", "panel commitments-page");
+    const list = testNode("div", "commitments-page-list", "commitments-page-list");
+    list.append(node("p", "muted", "Loading commitments…")); region.append(list); main.append(region);
+    void api("/commitments?status=active&limit=50").then(result => {
+      const data = requireOk(result, "Could not load commitments.");
+      const items = (data.commitments || []).filter(item => item.next_due_date)
+        .sort((a, b) => String(a.next_due_date).localeCompare(String(b.next_due_date)));
+      list.replaceChildren();
+      if (!items.length) { list.append(emptyState("No upcoming commitments", "Active recurring bills will appear here.")); return; }
+      for (const item of items) {
+        const row = node("article", "commitments-page-row");
+        const copy = node("div"); copy.append(node("strong", "", item.title), node("small", "", item.category || "Recurring commitment"));
+        row.append(copy, node("time", "", item.next_due_date), node("strong", "", formatMoney(item.amount_minor, item.currency, state.minorUnits)));
+        list.append(row);
+      }
+    }).catch(error => list.replaceChildren(node("p", "error-message", error.message || "Could not load commitments.")));
+  }
+
+  function buildActivityPage() {
+    main.replaceChildren(pageHeading("Wallet", "Recent activity.", "Your latest wallet payments and credits."));
+    const panel = node("section", "panel activity-page");
+    const region = node("div", "activity-list"); region.id = "activity-region";
+    const loading = loadingState("activity-loading", "Loading activity…"); loading.hidden = false;
+    region.append(loading); panel.append(region); main.append(panel);
+    void readPersonalActivity(state.me && state.me.user_id).then(items => renderActivity(region, items))
+      .catch(error => region.replaceChildren(node("p", "error-message", error.message || "Could not load activity.")));
+  }
+
   function buildAssistant() {
-    main.replaceChildren(pageHeading("Morrow assistant", "Money plans, in plain language.",
-      "Ask about your financial picture, or draft a social expense request for your review."));
+    main.replaceChildren(pageHeading("Assistant & payments", "Payments, plans and support.",
+      "Complete a money action, review your outlook, or ask Morrow a question."));
+    const actionSection = node("section", "money-workflow");
+    actionSection.id = "money-actions";
+    actionSection.append(node("h2", "", "Money actions"),
+      node("p", "field-hint", "Choose an action and complete its focused form."));
+    const actionForms = buildMoneyActionForms();
+    const actionGrid = node("div", "money-action-grid");
+    for (const key of ["pay", "request", "reserve"]) actionGrid.append(actionForms[key]);
+    actionSection.append(actionGrid); main.append(actionSection);
+
+    const forecastSettings = node("section", "panel forecast-settings-panel");
+    forecastSettings.id = "financial-outlook";
+    const fullOutlook = testNode("div", "full-financial-outlook", "full-financial-outlook", "Loading your forecast…");
+    fullOutlook.setAttribute("aria-live", "polite");
+    forecastSettings.append(panelHeading("Financial outlook", "Morrow uses wallet history and recurring commitments to estimate what remains."),
+      fullOutlook, panelHeading("Planning amounts", "These are reserved amounts in the forecast, not transactions."), buildForecastSettingsForm());
+    main.append(forecastSettings);
+    void api("/safe-to-spend").then(result => {
+      if (result.response.ok) renderFullOutlook(fullOutlook, result.data);
+      else fullOutlook.replaceChildren(node("p", "error-message", messageOf(result, "Could not load your forecast.")));
+    }).catch(error => fullOutlook.replaceChildren(node("p", "error-message", error.message || "Could not load your forecast.")));
     const companion = node("section", "panel assistant-panel companion-panel");
     companion.append(node("p", "eyebrow", "AI financial companion"));
     companion.append(node("h2", "", "Understand your money"));
@@ -1459,6 +1881,8 @@
       } catch (error) { response.replaceChildren(node("p", "error-message", error.message)); }
       finally { submit.disabled = false; }
     });
+    const requestedSection = decodeURIComponent(location.hash.slice(1));
+    if (requestedSection) setTimeout(() => document.getElementById(requestedSection)?.scrollIntoView({block: "start"}), 0);
   }
 
   async function refreshCheckoutHistory(list) {

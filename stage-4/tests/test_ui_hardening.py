@@ -1,5 +1,6 @@
 """The UI works under its Content-Security-Policy and stays usable on small screens."""
 import pytest
+from playwright.sync_api import expect
 
 import fixtures as fx
 from harness.http import assert_status, new_key
@@ -31,24 +32,40 @@ def test_ui_routes_raise_no_csp_violations(reset, page):
     assert violations == []
 
 
-@pytest.mark.parametrize("width", [375, 760])  # the nav scrolls, and clips, at 760px and below
-def test_nav_focus_ring_is_not_clipped_on_small_screens(reset, page, width):
+@pytest.mark.parametrize("width", [375, 760])
+def test_mobile_drawer_receives_focus_and_fits_small_screens(reset, page, width):
     reset(fx.fixture())
     page.set_viewport_size({"width": width, "height": 800})
     login(page, fx.ADA["email"])
-    link = page.locator(".main-nav a", has_text="Requests")
-    link.focus()
-    page.keyboard.press("Shift+Tab")
-    page.keyboard.press("Tab")
-    ring = link.evaluate("""el => {
-        const s = getComputedStyle(el), r = el.getBoundingClientRect();
-        const n = el.closest('.main-nav').getBoundingClientRect();
-        const reach = parseFloat(s.outlineWidth) + parseFloat(s.outlineOffset);
-        return {style: s.outlineStyle, top: r.top - reach, bottom: r.bottom + reach,
-                navTop: n.top, navBottom: n.bottom};
-    }""")
-    assert ring["style"] != "none"
-    assert ring["top"] >= ring["navTop"] - 0.5 and ring["bottom"] <= ring["navBottom"] + 0.5, ring
+    page.locator("#menu-toggle").click()
+    expect(page.locator("#drawer-close")).to_be_focused()
+    assert page.evaluate("document.activeElement.id") == "drawer-close"
+    page.wait_for_timeout(300)
+    bounds = page.locator(".app-sidebar").bounding_box()
+    assert bounds["x"] == 0 and 0 < bounds["width"] <= width
+    assert page.locator(".main-nav a").count() == 5
+
+
+def test_mobile_drawer_closes_with_escape_overlay_and_navigation(reset, page):
+    reset(fx.fixture())
+    page.set_viewport_size({"width": 390, "height": 844})
+    login(page, fx.ADA["email"])
+    toggle = page.locator("#menu-toggle")
+    toggle.click()
+    expect(page.locator("body")).to_have_class("nav-open")
+    assert page.evaluate("getComputedStyle(document.body).overflow") == "hidden"
+    page.keyboard.press("Escape")
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    expect(toggle).to_be_focused()
+    assert page.evaluate("getComputedStyle(document.body).overflow") != "hidden"
+
+    toggle.click()
+    page.locator("#drawer-overlay").click(position={"x": 350, "y": 300})
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    toggle.click()
+    page.locator(".main-nav a[href='/requests']").click()
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    assert page.url.endswith("/requests")
 
 
 def test_hold_expiry_is_labelled_and_keeps_its_exact_value(reset, page, api):

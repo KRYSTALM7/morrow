@@ -58,7 +58,7 @@ def test_204_payment_response_is_reported_as_uncertain(reset, page):
 
     page.route("**/payments", return_empty_success)
     login(page, fx.ADA["email"])
-    page.goto("/")
+    page.goto("/assistant#pay-form")
     page.fill(sel("pay-handle"), "bob")
     page.fill(sel("pay-amount"), "3.00")
     page.click(sel("pay-submit"))

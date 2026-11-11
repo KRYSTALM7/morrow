@@ -33,7 +33,7 @@ def test_unreachable_activity_shows_a_readable_message(reset, page):
 def test_unreachable_payment_stays_uncertain(reset, page):
     reset(fx.fixture())
     login(page, fx.ADA["email"])
-    page.goto("/")
+    page.goto("/assistant#pay-form")
     page.route("**/payments", lambda route: route.abort()
                if route.request.method == "POST" else route.continue_())
     page.fill(sel("pay-handle"), "bob")

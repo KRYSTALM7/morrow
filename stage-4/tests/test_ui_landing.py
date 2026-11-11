@@ -44,10 +44,10 @@ def test_brand_assets_load_on_landing_auth_and_authenticated_pages(reset, page):
         page.goto(route)
         logo = page.locator(".topbar .brand-logo")
         logo.wait_for(state="visible")
-        response = page.request.get(page.url.split("/", 3)[0] + "//" + page.url.split("/", 3)[2] + "/assets/assets/morrow-logo.png")
+        response = page.request.get(page.url.split("/", 3)[0] + "//" + page.url.split("/", 3)[2] + "/assets/assets/morrow-mark.png")
         assert response.status == 200, response.status
         page.wait_for_function("() => { const img = document.querySelector('.brand-logo'); return img && img.complete && img.naturalWidth > 0; }", timeout=3000)
-        assert logo.get_attribute("src") == "/assets/assets/morrow-logo.png"
+        assert logo.get_attribute("src") == "/assets/assets/morrow-mark.png"
         if route in ("/login", "/signup"):
             page.wait_for_function("() => { const img = document.querySelector('.auth-brand .brand-logo'); return img && img.complete && img.naturalWidth > 0; }")
 
@@ -58,5 +58,5 @@ def test_brand_assets_load_on_landing_auth_and_authenticated_pages(reset, page):
     page.wait_for_selector(sel("wallet-card"))
     logo = page.locator(".topbar .brand-logo")
     page.wait_for_function("() => { const img = document.querySelector('.topbar .brand-logo'); return img && img.complete && img.naturalWidth > 0; }")
-    assert page.locator("link[rel='icon']").get_attribute("href") == "/assets/assets/morrow-app-icon.png"
-    assert page.evaluate("fetch('/assets/assets/morrow-app-icon.png').then(response => response.status)") == 200
+    assert page.locator("link[rel='icon']").get_attribute("href") == "/assets/assets/morrow-mark.png"
+    assert page.evaluate("fetch('/assets/assets/morrow-mark.png').then(response => response.status)") == 200

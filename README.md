@@ -1,6 +1,8 @@
 # Morrow
 
-![Morrow — your money for tomorrow](stage-4/web/assets/morrow-logo.png)
+![Morrow logo: M wave and compass mark with lowercase wordmark](stage-4/web/assets/morrow-logo.png)
+
+**your money for tomorrow**
 
 Morrow is a personal finance app that brings your wallet, shared expenses, recurring commitments, and financial forecasts into one clear view. It helps you understand what is available today and plan for what comes next.
 
