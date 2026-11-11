@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Morrow — your money for tomorrow. A clearer view of your wallet and what comes next.">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/assets/morrow-app-icon.png">
+  <link rel="apple-touch-icon" href="/assets/assets/morrow-app-icon.png">
+  <title>Morrow — your money for tomorrow</title>
+  <link rel="stylesheet" href="/assets/pocketful.css">
+  <script src="/assets/pocketful.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo" src="/assets/assets/morrow-logo.png" alt="Morrow — your money for tomorrow"></a>
+    <div class="account-nav" id="account-nav"></div>
+  </header>
+  <div class="app-shell">
+    <aside class="app-sidebar" aria-label="Application navigation">
+      <p class="sidebar-label">Your money</p>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="/" aria-label="Overview">Overview</a>
+        <a href="/requests">Requests</a>
+        <a href="/split">Split bills</a>
+        <a href="/authorizations">Holds</a>
+        <a href="/assistant">Assistant &amp; payments</a>
+      </nav>
+      <div class="sidebar-note"><span class="sidebar-note-mark" aria-hidden="true">M</span><span><strong>Tomorrow, in view.</strong><small>Your money at a glance.</small></span></div>
+    </aside>
+    <main id="main-content" class="page-shell" tabindex="-1"></main>
+  </div>
+  <!-- Signed-out landing page; the bundled app script clones it into <main> on "/". -->
+  <template id="landing-template">
+    <section class="landing-hero" id="wallet-story" data-testid="landing-hero">
+      <div class="landing-intro">
+        <p class="eyebrow">YOUR MONEY, TOMORROW.</p>
+        <h1>Your balance isn't the whole story.</h1>
+        <p class="lede">See what's available, what's coming, and what you can actually spend.</p>
+        <div class="form-actions">
+          <a class="primary-button" href="/signup" data-testid="landing-signup">Create account</a>
+          <a class="secondary-button" href="#money-clarity">See how it works</a>
+        </div>
+        <p class="landing-trust"><span class="trust-check" aria-hidden="true">✓</span> Clear numbers. Thoughtful decisions. Your pace.</p>
+      </div>
+      <aside class="wallet-stage" data-scene="0" role="group" aria-label="Illustrative Morrow wallet product preview">
+        <div class="wallet-stage-glow" aria-hidden="true"></div>
+        <div class="wallet-scene-label"><span class="scene-pulse" aria-hidden="true"></span><span data-testid="wallet-scene-label">Wallet overview</span></div>
+        <div class="wallet-art" aria-hidden="true">
+          <div class="wallet-back"></div>
+          <div class="wallet-card wallet-card-forecast">
+            <span class="card-kicker">MONTHLY OUTLOOK</span><strong>History still building</strong><span>Safe-to-Spend unavailable in this demo</span>
+          </div>
+          <div class="wallet-card wallet-card-shared">
+            <span class="card-kicker">SHARED EXPENSE</span><strong>Weekend dinner <b>€42.00</b></strong><span>€18.00 reimbursed · illustrative</span>
+          </div>
+          <div class="wallet-card wallet-card-commitments">
+            <span class="card-kicker">COMING UP</span><strong>3 commitments <b>€780.00</b></strong><span>Illustrative demo values</span>
+          </div>
+          <div class="wallet-card wallet-card-available">
+            <span class="card-kicker">AVAILABLE FUNDS</span><strong>€2,480.00</strong><span>Illustrative demo value</span>
+          </div>
+          <div class="wallet-pocket"><span class="wallet-snap"></span><span class="wallet-emboss">morrow</span></div>
+          <div class="wallet-lid"><span class="wallet-lid-seam"></span><span class="wallet-lid-mark">M</span></div>
+        </div>
+        <p class="wallet-demo-note">Illustrative demo values · not connected to an account</p>
+        <div class="wallet-scene-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+      </aside>
+      <div class="story-scenes" role="group" aria-label="How Morrow brings your money into view">
+        <article class="story-scene" data-wallet-scene="0" id="wallet-scene-one">
+          <span class="story-index">01 <i></i> OVERVIEW</span>
+          <h2>Your money, all in view.</h2>
+          <p>Your wallet is one part of the picture. Morrow brings the pieces together so you can see the full view.</p>
+          <div class="story-mini-demo mini-wallet"><span class="mini-wallet-mark">M</span><span><b>Your wallet</b><small>One clear starting point</small></span></div>
+        </article>
+        <article class="story-scene" data-wallet-scene="1" id="wallet-scene-two">
+          <span class="story-index">02 <i></i> AVAILABLE FUNDS</span>
+          <h2>Know what you have available.</h2>
+          <p>See your wallet funds and open holds together, so the amount on screen has useful context.</p>
+          <div class="story-mini-demo mini-balance"><span>Available wallet funds <small>Illustrative demo</small></span><b>€2,480.00</b></div>
+        </article>
+        <article class="story-scene" data-wallet-scene="2" id="wallet-scene-three">
+          <span class="story-index">03 <i></i> COMMITMENTS</span>
+          <h2>See what's coming before it arrives.</h2>
+          <p>Keep bills and subscriptions in view alongside what is still unpaid.</p>
+          <div class="story-mini-demo mini-commitment"><span class="mini-date">12<br><small>JUN</small></span><span><b>Home internet</b><small>Due soon · illustrative</small></span><strong>€48.00</strong></div>
+        </article>
+        <article class="story-scene" data-wallet-scene="3" id="wallet-scene-four">
+          <span class="story-index">04 <i></i> SHARED EXPENSES</span>
+          <h2>Keep shared money organised.</h2>
+          <p>Track each person's share and the reimbursements recorded so far, without mixing them up with wallet transfers.</p>
+          <div class="story-mini-demo mini-shared"><span class="mini-avatar">N</span><span><b>Weekend dinner</b><small>Illustrative · share €42.00 · €18.00 reimbursed</small></span><span class="mini-progress"><i></i></span></div>
+        </article>
+        <article class="story-scene" data-wallet-scene="4" id="wallet-scene-five">
+          <span class="story-index">05 <i></i> FINANCIAL OUTLOOK</span>
+          <h2>Make tomorrow's decisions with confidence.</h2>
+          <p>Morrow calculates forecasts deterministically. The assistant explains the result and says when there isn't enough history to show a Safe-to-Spend figure.</p>
+          <div class="story-mini-demo mini-outlook"><span><b>Safe-to-Spend</b><small>History coverage is still building</small></span><strong>Not available yet</strong></div>
+        </article>
+      </div>
+    </section>
+    <section class="landing-feature-section feature-clarity" id="money-clarity" aria-labelledby="clarity-title">
+      <div class="feature-copy">
+        <p class="eyebrow">MONEY CLARITY</p>
+        <h2 id="clarity-title">Know where you stand.</h2>
+        <p>Your balance tells you what you have. Morrow helps you understand what you can actually spend, with commitments and forecasts in context.</p>
+        <a class="text-link" href="/signup">Bring your money into view <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="product-visual dashboard-demo" role="group" aria-label="Illustrative wallet dashboard; Safe-to-Spend is unavailable until enough history is available">
+        <div class="demo-window-bar"><span></span><span></span><span></span><small>Illustrative demo</small></div>
+        <div class="demo-dashboard-head"><span><small>AVAILABLE WALLET FUNDS</small><strong>€2,480.00</strong></span><span class="demo-wallet-icon">M</span></div>
+        <div class="demo-dashboard-grid"><div><small>UNPAID COMMITMENTS</small><b>€780.00</b></div><div><small>OPEN HOLDS</small><b>€120.00</b></div></div>
+        <p class="safe-formula">Available funds − unpaid commitments − forecast remaining variable spending − savings target − safety buffer</p>
+        <div class="demo-unavailable"><span class="status-dot"></span><span><b>Safe-to-Spend unavailable</b><small>Three complete prior months of history are needed for this example.</small></span></div>
+        <p class="visual-disclaimer">Illustrative demo values · not account data</p>
+      </div>
+    </section>
+
+    <section class="landing-feature-section feature-shared" aria-labelledby="shared-title">
+      <div class="feature-copy">
+        <p class="eyebrow">SHARED EXPENSES</p>
+        <h2 id="shared-title">Split without the confusion.</h2>
+        <p>See how a shared cost is divided and track reimbursements as they are recorded. Reimbursement records stay separate from wallet payments.</p>
+        <a class="text-link" href="/split">Explore shared expenses <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="product-visual shared-demo" role="group" aria-label="Illustrative shared expense with three equal shares and partial reimbursement">
+        <div class="demo-window-bar"><span></span><span></span><span></span><small>Illustrative demo</small></div>
+        <div class="demo-card-title"><span class="demo-icon demo-icon-shared">↗</span><span><small>SHARED EXPENSE</small><b>Weekend dinner</b></span><strong>€84.00</strong></div>
+        <div class="share-row"><span class="mini-avatar avatar-blue">A</span><span><b>You</b><small>Paid the bill · share €28.00</small></span><strong>€28.00</strong></div>
+        <div class="share-row"><span class="mini-avatar avatar-sand">N</span><span><b>Nia</b><small>Share · settled</small></span><strong>€28.00</strong></div>
+        <div class="share-row"><span class="mini-avatar avatar-mint">L</span><span><b>Leo</b><small>Share · €18.00 reimbursed</small></span><strong>€10.00 left</strong></div>
+        <div class="reimbursement-track"><span><i></i></span><small>€18.00 of €28.00 recorded</small></div>
+        <p class="visual-disclaimer">Illustrative demo values · not account data</p>
+      </div>
+    </section>
+
+    <section class="landing-feature-section feature-commitments" aria-labelledby="commitments-title">
+      <div class="feature-copy">
+        <p class="eyebrow">COMMITMENTS</p>
+        <h2 id="commitments-title">Tomorrow's bills shouldn't surprise you.</h2>
+        <p>Keep recurring bills and subscriptions visible, with due dates and unpaid amounts in one simple list.</p>
+        <a class="text-link" href="/login">See your commitments <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="product-visual commitments-demo" role="group" aria-label="Illustrative upcoming bills and subscriptions">
+        <div class="demo-window-bar"><span></span><span></span><span></span><small>Illustrative demo</small></div>
+        <div class="demo-section-heading"><span><small>UP NEXT</small><b>Recurring commitments</b></span><span class="demo-count">3 due</span></div>
+        <div class="commitment-row"><span class="date-tile"><b>12</b><small>JUN</small></span><span><b>Home internet</b><small>Subscription · unpaid</small></span><strong>€48.00</strong></div>
+        <div class="commitment-row"><span class="date-tile date-tile-blue"><b>16</b><small>JUN</small></span><span><b>Electricity</b><small>Utility · unpaid</small></span><strong>€92.00</strong></div>
+        <div class="commitment-row"><span class="date-tile date-tile-violet"><b>20</b><small>JUN</small></span><span><b>Studio membership</b><small>Recurring · unpaid</small></span><strong>€35.00</strong></div>
+        <div class="commitment-total"><span>Unpaid in this example</span><b>€175.00</b></div>
+        <p class="visual-disclaimer">Illustrative demo values · not account data</p>
+      </div>
+    </section>
+
+    <section class="landing-feature-section feature-assistant" aria-labelledby="assistant-title">
+      <div class="feature-copy">
+        <p class="eyebrow">FINANCIAL ASSISTANT</p>
+        <h2 id="assistant-title">Ask. Understand. Decide.</h2>
+        <p>Get a plain-English explanation of verified wallet and finance summaries. The assistant explains deterministic results; it doesn't calculate or change your records.</p>
+        <a class="text-link" href="/assistant">Explore the assistant <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="product-visual assistant-demo" role="group" aria-label="Sample assistant conversation; illustrative only">
+        <div class="demo-window-bar"><span></span><span></span><span></span><small>Sample conversation</small></div>
+        <div class="chat-question"><small>YOU ASKED</small><p>Why can't I see a Safe-to-Spend amount yet?</p></div>
+        <div class="chat-answer"><span class="assistant-avatar">M</span><div><small>MORROW ASSISTANT · SAMPLE</small><p>The forecast needs three complete prior months of wallet history. Until then, there isn't enough information to show a reliable amount.</p><span class="answer-source">Based on verified Morrow data</span></div></div>
+        <p class="visual-disclaimer">Example only · assistant explains verified results</p>
+      </div>
+    </section>
+
+    <section class="landing-feature-section feature-paypal" aria-labelledby="paypal-title">
+      <div class="feature-copy">
+        <p class="eyebrow">PAYPAL CHECKOUT</p>
+        <h2 id="paypal-title">Checkout with PayPal.</h2>
+        <p>Morrow connects to PayPal Orders in Sandbox for merchant checkout. This is separate from internal wallet payments and does not send money to another Morrow user.</p>
+        <a class="text-link" href="/assistant">See payment tools <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="product-visual paypal-demo" role="group" aria-label="Illustrative PayPal Sandbox merchant checkout flow">
+        <div class="demo-window-bar"><span></span><span></span><span></span><small>Sandbox flow</small></div>
+        <div class="sandbox-mark"><span>PayPal</span><b>SANDBOX</b></div>
+        <div class="sandbox-order"><span><small>MERCHANT ORDER</small><b>Online purchase</b></span><strong>€24.00</strong></div>
+        <div class="sandbox-steps"><span class="step-done"><i>✓</i><small>Order created</small></span><i></i><span><i>2</i><small>Buyer approval</small></span><i></i><span><i>3</i><small>Capture verified</small></span></div>
+        <p class="sandbox-disclaimer">Sandbox demonstration · no real payment</p>
+      </div>
+    </section>
+
+    <section class="landing-cta landing-final-cta">
+      <div class="final-cta-copy">
+        <p class="eyebrow">A CLEARER WAY FORWARD</p>
+        <h2>Make tomorrow clearer.</h2>
+        <p>Bring your commitments, shared spending, and financial outlook into one place.</p>
+      </div>
+      <a class="primary-button" href="/signup" data-testid="landing-final-signup">Create your Morrow account <span aria-hidden="true">→</span></a>
+    </section>
+  </template>
+  <footer class="site-footer"><span>your money for tomorrow</span><span>Morrow</span></footer>
+</body>
+</html>
