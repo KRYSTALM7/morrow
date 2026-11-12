@@ -16,6 +16,7 @@ import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,7 @@ from finance_store import (FinanceConflict, FinanceNotFound, FinanceStore,
 from forecast_engine import (MODEL_VERSION, calculate_forecast,
                               statement_history_start)
 from gemini_provider import GeminiProvider, GeminiUnavailable
+from auth_roles import require_analyst, require_admin, VALID_SIGNUP_ROLES
 from payments_store import CheckoutStore, utc_now
 from paypal import PayPalClient, PayPalError
 from wallet_store import WalletStore
@@ -384,8 +386,38 @@ def empty_state():
             "opening_balances": {}}
 
 
+def require_admin(user):
+    """Check if user has PLATFORM_ADMIN role. Returns (has_access, error_message)."""
+    if not user:
+        return False, "User not found"
+    if "PLATFORM_ADMIN" not in user.get("roles", []):
+        return False, "Admin access required"
+    return True, None
+
+
+def require_analyst(user):
+    """Check if user has PAYMENT_ANALYST role and is approved. Returns (has_access, error_message)."""
+    if not user:
+        return False, "User not found"
+    if "PAYMENT_ANALYST" not in user.get("roles", []):
+        return False, "Analyst role required"
+    if user.get("analyst_status") != "approved":
+        return False, "Analyst account not approved"
+    return True, None
+
+
 class Service:
     def __init__(self):
+        # Import and setup database configuration
+        from db_config import ensure_data_dir_exists, get_db_paths, get_database_config
+        
+        db_config = get_database_config()
+        self.db_type = db_config['type']
+        
+        if self.db_type == 'sqlite':
+            ensure_data_dir_exists()
+            db_paths = get_db_paths()
+        
         self.lock = threading.RLock()
         self.state = empty_state()
         self.statement_snapshots = {}
@@ -393,20 +425,29 @@ class Service:
         self.ai_provider = DeterministicProvider()
         self.gemini_provider = GeminiProvider()
         self.companion_requests = {}
-        default_db = os.path.join(tempfile.gettempdir(),
-                                  f"pocketful-stage4-paypal-{os.environ.get('PORT', '8080')}.sqlite3")
-        payment_db = os.environ.get("PAYPAL_DB_PATH", default_db)
-        finance_db = os.environ.get("MORROW_FINANCE_DB_PATH", payment_db)
-        payment_path = Path(payment_db).resolve()
-        finance_path = Path(finance_db).resolve()
-        default_wallet_db = str(payment_path.with_name(payment_path.stem + "-wallet.sqlite3"))
-        wallet_db = os.environ.get("MORROW_WALLET_DB_PATH", default_wallet_db)
-        wallet_path = Path(wallet_db).resolve()
-        if wallet_path in (payment_path, finance_path):
-            raise RuntimeError("MORROW_WALLET_DB_PATH must be separate from PayPal and finance databases")
+        
+        if self.db_type == 'sqlite':
+            # Use configured paths or environment variable overrides
+            payment_db = os.environ.get("PAYPAL_DB_PATH", db_paths["payments"])
+            finance_db = os.environ.get("MORROW_FINANCE_DB_PATH", db_paths["finance"])
+            wallet_db = os.environ.get("MORROW_WALLET_DB_PATH", db_paths["wallet"])
+            
+            # Validate paths are different
+            payment_path = Path(payment_db).resolve()
+            finance_path = Path(finance_db).resolve()
+            wallet_path = Path(wallet_db).resolve()
+            if wallet_path in (payment_path, finance_path):
+                raise RuntimeError("MORROW_WALLET_DB_PATH must be separate from PayPal and finance databases")
+        else:
+            # PostgreSQL: paths not used
+            payment_db = None
+            finance_db = None
+            wallet_db = None
+        
         self.paypal_store = CheckoutStore(payment_db)
         self.finance_store = FinanceStore(finance_db)
-        self.wallet_store = WalletStore(str(wallet_path))
+        self.wallet_store = WalletStore(wallet_db)  # Handles None for PostgreSQL
+        
         stored_state = self.wallet_store.load()
         migration_file = os.environ.get("MORROW_WALLET_MIGRATION_FILE")
         if stored_state is not None:
@@ -1537,7 +1578,8 @@ class Service:
         result = {"user_id": uid, "display_name": user["display_name"],
                   "handle": user["handle"], "balance": total, "total": total,
                   "available": total - held, "held": held,
-                  "currency": self.state["currency"], "minor_units": self.state["minor_units"]}
+                  "currency": self.state["currency"], "minor_units": self.state["minor_units"],
+                  "roles": user.get("roles", ["CUSTOMER"])}
         if as_of:
             result["as_of"] = as_of[0]
         if known_at:
@@ -2746,6 +2788,12 @@ class Service:
         email = required_string(body, "email")
         password = required_string(body, "password")
         display = required_string(body, "display_name")
+        requested_role = body.get("role", "CUSTOMER")
+        
+        # Validate role (cannot self-assign PLATFORM_ADMIN)
+        if requested_role not in VALID_SIGNUP_ROLES:
+            fail(422, "validation_failed", f"Invalid role. Allowed: {', '.join(VALID_SIGNUP_ROLES)}")
+        
         if not EMAIL_RE.fullmatch(email) or email.count("@") != 1:
             fail(422, "validation_failed", "Invalid email address")
         if len(password) < 8 or len(password) > 1024:
@@ -2779,8 +2827,24 @@ class Service:
                 uid, token = new_id("u"), secrets.token_urlsafe(32)
                 registered_at = now()
                 self.finance_store.ensure_financial_preferences(uid, registered_at)
-                self.state["users"][uid] = {"id": uid, "email": email, "password_hash": hashed,
-                                            "display_name": display, "handle": handle, "balance": 0}
+                
+                # Create user with requested role
+                user_obj = {
+                    "id": uid,
+                    "email": email,
+                    "password_hash": hashed,
+                    "display_name": display,
+                    "handle": handle,
+                    "balance": 0,
+                    "roles": [requested_role]
+                }
+                
+                # If requesting PAYMENT_ANALYST role, set status to pending
+                if requested_role == "PAYMENT_ANALYST":
+                    user_obj["analyst_status"] = "pending"
+                    user_obj["analyst_requested_at"] = registered_at
+                
+                self.state["users"][uid] = user_obj
                 self.state["emails"][email] = uid
                 self.state["handles"][handle] = uid
                 self.state["opening_balances"][uid] = 0
@@ -2788,8 +2852,414 @@ class Service:
                 self.wallet_store.create_session(token, uid, expires_at=expires_at)
                 self._reconcile_wallet_state()
                 self.wallet_store.save(self.state)
-                return 201, {"user_id": uid, "display_name": display,
-                             "token": token, "expires_at": expires_at}
+                
+                response = {
+                    "user_id": uid,
+                    "display_name": display,
+                    "token": token,
+                    "expires_at": expires_at,
+                    "roles": [requested_role]
+                }
+                
+                if requested_role == "PAYMENT_ANALYST":
+                    response["analyst_status"] = "pending"
+                
+                return 201, response
+
+    # Analyst API methods
+    def _analyst_overview(self, uid):
+        """Get aggregated payment analytics (approved analysts only)."""
+        user = self.state["users"].get(uid)
+        has_access, error = require_analyst(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        with closing(self.paypal_store._connect()) as db:
+            # Get all checkouts (not user-scoped for analysts)
+            rows = [dict(row) for row in db.execute(
+                "SELECT * FROM paypal_checkouts ORDER BY created_at DESC"
+            ).fetchall()]
+        
+        # Calculate metrics by currency
+        captured_revenue = {}
+        pending_count = 0
+        failed_count = 0
+        captured_count = 0
+        
+        for row in rows:
+            currency = row["currency"]
+            status = row["status"]
+            amount = row["amount_minor"]
+            
+            if status == "COMPLETED":
+                captured_revenue[currency] = captured_revenue.get(currency, 0) + amount
+                captured_count += 1
+            elif status in ("CREATED", "APPROVED", "CAPTURE_IN_PROGRESS", "CAPTURE_PENDING"):
+                pending_count += 1
+            elif status in ("CAPTURE_FAILED", "FAILED"):
+                failed_count += 1
+        
+        # Calculate success rate (null if no completed attempts)
+        total_completed = captured_count + failed_count
+        success_rate = None
+        if total_completed > 0:
+            success_rate = round((captured_count * 100.0) / total_completed, 2)
+        
+        # Average transaction value by currency
+        avg_value = {}
+        for currency in captured_revenue:
+            captured_in_currency = [r for r in rows if r["status"] == "COMPLETED" and r["currency"] == currency]
+            if captured_in_currency:
+                avg_value[currency] = captured_revenue[currency] // len(captured_in_currency)
+        
+        return 200, {
+            "captured_revenue": captured_revenue,
+            "pending_transactions": pending_count,
+            "failed_attempts": failed_count,
+            "success_rate": success_rate,
+            "total_transactions": len(rows),
+            "average_transaction_value": avg_value
+        }
+    
+    def _analyst_transactions(self, uid, query):
+        """List transactions with pagination and filters (approved analysts only)."""
+        user = self.state["users"].get(uid)
+        has_access, error = require_analyst(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        # Validate pagination
+        try:
+            limit = int(query.get("limit", ["50"])[0])
+            if not (1 <= limit <= 100):
+                fail(400, "validation_failed", "limit must be between 1 and 100")
+        except ValueError:
+            fail(400, "validation_failed", "limit must be an integer")
+        
+        try:
+            offset = int(query.get("offset", ["0"])[0])
+            if not (0 <= offset <= 10000):
+                fail(400, "validation_failed", "offset must be between 0 and 10000")
+        except ValueError:
+            fail(400, "validation_failed", "offset must be an integer")
+        
+        # Validate filters
+        status_filter = query.get("status", [None])[0]
+        valid_statuses = {"CREATING", "CREATED", "APPROVED", "COMPLETED", "CAPTURE_FAILED", "FAILED", "VOIDED"}
+        if status_filter and status_filter not in valid_statuses:
+            fail(400, "validation_failed", f"Invalid status. Allowed: {', '.join(valid_statuses)}")
+        
+        currency_filter = query.get("currency", [None])[0]
+        if currency_filter and currency_filter not in ("EUR", "USD", "GBP", "JPY"):
+            fail(400, "validation_failed", "Invalid currency. Allowed: EUR, USD, GBP, JPY")
+        
+        start_date = query.get("start_date", [None])[0]
+        end_date = query.get("end_date", [None])[0]
+        
+        if start_date and end_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                if start_dt > end_dt:
+                    fail(400, "validation_failed", "start_date must be before or equal to end_date")
+                if (end_dt - start_dt).days > 365:
+                    fail(400, "validation_failed", "Date range cannot exceed 365 days")
+            except ValueError:
+                fail(400, "validation_failed", "Invalid date format. Use ISO 8601 (YYYY-MM-DD)")
+        
+        # Fetch all checkouts
+        with closing(self.paypal_store._connect()) as db:
+            rows = [dict(row) for row in db.execute(
+                "SELECT * FROM paypal_checkouts ORDER BY created_at DESC"
+            ).fetchall()]
+        
+        # Apply filters
+        if status_filter:
+            rows = [r for r in rows if r["status"] == status_filter]
+        if currency_filter:
+            rows = [r for r in rows if r["currency"] == currency_filter]
+        if start_date:
+            rows = [r for r in rows if r["created_at"] >= start_date]
+        if end_date:
+            rows = [r for r in rows if r["created_at"] <= end_date]
+        
+        total_count = len(rows)
+        rows = rows[offset:offset + limit]
+        
+        # Build response (privacy: only buyer_id exposed, not email/display_name)
+        transactions = []
+        for r in rows:
+            transactions.append({
+                "checkout_id": r["checkout_id"],
+                "buyer_id": r["user_id"],
+                "amount_minor": r["amount_minor"],
+                "currency": r["currency"],
+                "status": r["status"],
+                "note": r["note"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"]
+            })
+        
+        return 200, {
+            "transactions": transactions,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < total_count
+        }
+    
+    def _analyst_analytics(self, uid, query):
+        """Get daily revenue trends (approved analysts only)."""
+        user = self.state["users"].get(uid)
+        has_access, error = require_analyst(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        # Validate days parameter
+        try:
+            days = int(query.get("days", ["30"])[0])
+            if not (1 <= days <= 90):
+                fail(400, "validation_failed", "days must be between 1 and 90")
+        except ValueError:
+            fail(400, "validation_failed", "days must be an integer")
+        
+        # Fetch completed checkouts
+        with closing(self.paypal_store._connect()) as db:
+            rows = [dict(row) for row in db.execute(
+                "SELECT * FROM paypal_checkouts WHERE status='COMPLETED' ORDER BY created_at DESC"
+            ).fetchall()]
+        
+        # Group by date and currency
+        daily_data = {}
+        for row in rows:
+            date_key = row["created_at"][:10]  # Extract YYYY-MM-DD
+            currency = row["currency"]
+            key = (date_key, currency)
+            
+            if key not in daily_data:
+                daily_data[key] = {"revenue_minor": 0, "transaction_count": 0}
+            
+            daily_data[key]["revenue_minor"] += row["amount_minor"]
+            daily_data[key]["transaction_count"] += 1
+        
+        # Build response
+        daily_revenue = [
+            {
+                "date": date_key,
+                "currency": currency,
+                "revenue_minor": data["revenue_minor"],
+                "transaction_count": data["transaction_count"]
+            }
+            for (date_key, currency), data in sorted(daily_data.items(), reverse=True)[:days * 4]  # Allow multiple currencies per day
+        ]
+        
+        return 200, {
+            "daily_revenue": daily_revenue,
+            "days_requested": days
+        }
+    
+    # Admin API methods
+    def _admin_list_analysts(self, uid, query):
+        """List all analyst accounts (admin only)."""
+        user = self.state["users"].get(uid)
+        has_access, error = require_admin(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        # Validate pagination
+        try:
+            limit = int(query.get("limit", ["50"])[0])
+            if not (1 <= limit <= 100):
+                fail(400, "validation_failed", "limit must be between 1 and 100")
+        except ValueError:
+            fail(400, "validation_failed", "limit must be an integer")
+        
+        try:
+            offset = int(query.get("offset", ["0"])[0])
+            if not (0 <= offset <= 10000):
+                fail(400, "validation_failed", "offset must be between 0 and 10000")
+        except ValueError:
+            fail(400, "validation_failed", "offset must be an integer")
+        
+        # Validate status filter
+        status_filter = query.get("status", [None])[0]
+        if status_filter and status_filter not in ("pending", "approved", "suspended", "rejected"):
+            fail(400, "validation_failed", "Invalid status. Allowed: pending, approved, suspended, rejected")
+        
+        # Find all analysts
+        analysts = []
+        for user_obj in self.state["users"].values():
+            if "PAYMENT_ANALYST" in user_obj.get("roles", []):
+                analyst_status = user_obj.get("analyst_status", "pending")
+                
+                if status_filter and analyst_status != status_filter:
+                    continue
+                
+                analysts.append({
+                    "user_id": user_obj["id"],
+                    "email": user_obj["email"],  # Admin can see emails
+                    "display_name": user_obj["display_name"],
+                    "handle": user_obj["handle"],
+                    "analyst_status": analyst_status,
+                    "analyst_requested_at": user_obj.get("analyst_requested_at"),
+                    "analyst_approved_by": user_obj.get("analyst_approved_by"),
+                    "analyst_approved_at": user_obj.get("analyst_approved_at"),
+                    "analyst_suspended_by": user_obj.get("analyst_suspended_by"),
+                    "analyst_suspended_at": user_obj.get("analyst_suspended_at"),
+                    "analyst_suspension_reason": user_obj.get("analyst_suspension_reason")
+                })
+        
+        # Sort by requested date (newest first)
+        analysts.sort(key=lambda a: a.get("analyst_requested_at") or "", reverse=True)
+        
+        total_count = len(analysts)
+        analysts = analysts[offset:offset + limit]
+        
+        return 200, {
+            "analysts": analysts,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + limit < total_count
+        }
+    
+    def _admin_approve_analyst(self, admin_uid, target_user_id):
+        """Approve pending analyst (admin only)."""
+        user = self.state["users"].get(admin_uid)
+        has_access, error = require_admin(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        target_user = self.state["users"].get(target_user_id)
+        if not target_user:
+            fail(404, "not_found", "User not found")
+        
+        if "PAYMENT_ANALYST" not in target_user.get("roles", []):
+            fail(422, "validation_failed", "User does not have PAYMENT_ANALYST role")
+        
+        previous_status = target_user.get("analyst_status", "pending")
+        if previous_status == "approved":
+            fail(422, "validation_failed", "Analyst already approved")
+        
+        # Update user status
+        target_user["analyst_status"] = "approved"
+        target_user["analyst_approved_by"] = admin_uid
+        target_user["analyst_approved_at"] = now()
+        
+        # Log admin action
+        action_id = f"act_{secrets.token_urlsafe(16)}"
+        self.wallet_store.log_admin_action(
+            action_id=action_id,
+            action_type="approve_analyst",
+            actor_user_id=admin_uid,
+            target_user_id=target_user_id,
+            reason=None,
+            metadata={"previous_status": previous_status}
+        )
+        
+        return 200, {
+            "success": True,
+            "analyst": {
+                "user_id": target_user_id,
+                "analyst_status": "approved",
+                "approved_by": admin_uid,
+                "approved_at": target_user["analyst_approved_at"]
+            }
+        }
+    
+    def _admin_suspend_analyst(self, admin_uid, target_user_id, body):
+        """Suspend approved analyst (admin only)."""
+        user = self.state["users"].get(admin_uid)
+        has_access, error = require_admin(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        reason = body.get("reason", "").strip()
+        if not reason:
+            fail(422, "validation_failed", "Suspension reason required")
+        
+        target_user = self.state["users"].get(target_user_id)
+        if not target_user:
+            fail(404, "not_found", "User not found")
+        
+        if "PAYMENT_ANALYST" not in target_user.get("roles", []):
+            fail(422, "validation_failed", "User does not have PAYMENT_ANALYST role")
+        
+        previous_status = target_user.get("analyst_status", "pending")
+        if previous_status == "suspended":
+            fail(422, "validation_failed", "Analyst already suspended")
+        
+        # Update user status
+        target_user["analyst_status"] = "suspended"
+        target_user["analyst_suspended_by"] = admin_uid
+        target_user["analyst_suspended_at"] = now()
+        target_user["analyst_suspension_reason"] = reason
+        
+        # Log admin action
+        action_id = f"act_{secrets.token_urlsafe(16)}"
+        self.wallet_store.log_admin_action(
+            action_id=action_id,
+            action_type="suspend_analyst",
+            actor_user_id=admin_uid,
+            target_user_id=target_user_id,
+            reason=reason,
+            metadata={"previous_status": previous_status}
+        )
+        
+        return 200, {
+            "success": True,
+            "analyst": {
+                "user_id": target_user_id,
+                "analyst_status": "suspended",
+                "suspended_by": admin_uid,
+                "suspended_at": target_user["analyst_suspended_at"],
+                "suspension_reason": reason
+            }
+        }
+    
+    def _admin_reinstate_analyst(self, admin_uid, target_user_id):
+        """Reinstate suspended analyst (admin only)."""
+        user = self.state["users"].get(admin_uid)
+        has_access, error = require_admin(user)
+        if not has_access:
+            fail(403, "forbidden", error)
+        
+        target_user = self.state["users"].get(target_user_id)
+        if not target_user:
+            fail(404, "not_found", "User not found")
+        
+        if "PAYMENT_ANALYST" not in target_user.get("roles", []):
+            fail(422, "validation_failed", "User does not have PAYMENT_ANALYST role")
+        
+        previous_status = target_user.get("analyst_status", "pending")
+        if previous_status != "suspended":
+            fail(422, "validation_failed", "Analyst is not suspended")
+        
+        # Update user status
+        target_user["analyst_status"] = "approved"
+        target_user["analyst_approved_by"] = admin_uid
+        target_user["analyst_approved_at"] = now()
+        
+        # Log admin action
+        action_id = f"act_{secrets.token_urlsafe(16)}"
+        self.wallet_store.log_admin_action(
+            action_id=action_id,
+            action_type="reinstate_analyst",
+            actor_user_id=admin_uid,
+            target_user_id=target_user_id,
+            reason=None,
+            metadata={"previous_status": previous_status}
+        )
+        
+        return 200, {
+            "success": True,
+            "analyst": {
+                "user_id": target_user_id,
+                "analyst_status": "approved",
+                "approved_by": admin_uid,
+                "approved_at": target_user["analyst_approved_at"]
+            }
+        }
 
     def _reconcile_wallet_state(self):
         document = {"track": "pocketful", "format_version": 1,
@@ -2879,6 +3349,29 @@ class Service:
 
             if method == "GET" and path == "/me":
                 return 200, self._me_at(uid, query, read_at)
+            
+            # Analyst endpoints
+            if method == "GET" and path == "/api/analyst/overview":
+                return self._analyst_overview(uid)
+            if method == "GET" and path == "/api/analyst/transactions":
+                return self._analyst_transactions(uid, query)
+            if method == "GET" and path == "/api/analyst/analytics":
+                return self._analyst_analytics(uid, query)
+            
+            # Admin endpoints
+            if method == "GET" and path == "/api/admin/analysts":
+                return self._admin_list_analysts(uid, query)
+            
+            analyst_match = re.fullmatch(r"/api/admin/analysts/([^/]+)/(approve|suspend|reinstate)", path)
+            if method == "POST" and analyst_match:
+                target_user_id, action = analyst_match.groups()
+                if action == "approve":
+                    return self._admin_approve_analyst(uid, target_user_id)
+                elif action == "suspend":
+                    return self._admin_suspend_analyst(uid, target_user_id, body)
+                elif action == "reinstate":
+                    return self._admin_reinstate_analyst(uid, target_user_id)
+            
             if method == "GET" and path == "/forecast/settings":
                 row = self.finance_store.ensure_financial_preferences(uid)
                 return 200, self._financial_preferences_api(
@@ -3110,7 +3603,7 @@ class Service:
 SERVICE = Service()
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 UI_ROUTES = {"/", "/requests", "/split", "/assistant", "/paypal/return",
-             "/signup", "/login", "/authorizations"}
+             "/signup", "/login", "/authorizations", "/analyst", "/admin", "/docs", "/commitments", "/activity"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -3137,10 +3630,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.command in ("GET", "HEAD"):
                 static_path = parsed.path
+                # Handle /assets/ paths: keep the assets/ part in the path
                 if static_path.startswith("/assets/"):
-                    static_path = static_path[len("/assets/"):]
+                    static_path = static_path[1:]  # Remove only the leading slash
                 elif static_path.startswith("/"):
                     static_path = static_path[1:]
+                # Serve analyst.html, admin.html and docs.html directly
+                if static_path in ("analyst.html", "admin.html", "docs.html", "openapi.yaml"):
+                    root = WEB_ROOT.resolve()
+                    asset = (root / static_path).resolve()
+                    if asset.is_relative_to(root) and asset.is_file():
+                        content_type = "text/html"
+                        self._send_bytes(200, asset.read_bytes(), content_type + "; charset=utf-8")
+                        return
                 if static_path and static_path not in ("index.html",):
                     root = WEB_ROOT.resolve()
                     asset = (root / static_path).resolve()
@@ -3171,6 +3673,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        
+        # CORS headers for cross-origin requests from frontend
+        origin = self.headers.get("Origin", "")
+        allowed_origins = [
+            "https://morrow-frontend.onrender.com",
+            "http://localhost:9000",  # local development
+            "http://localhost:8080",  # local development
+        ]
+        
+        if origin in allowed_origins:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
+            self.send_header("Access-Control-Max-Age", "86400")  # 24 hours
+        
         if content_type.startswith("text/html"):
             self.send_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         self.send_header("Connection", "close")

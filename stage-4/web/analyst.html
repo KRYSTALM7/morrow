@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Morrow Payment Analytics — Transaction insights and reporting">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/morrow-mark.png">
+  <title>Payment Analytics — Morrow</title>
+  <link rel="stylesheet" href="/assets/pocketful.css">
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  
+  <!-- AG Grid Community -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-grid.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-theme-alpine.css">
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/dist/ag-grid-community.min.js"></script>
+</head>
+<body>
+  <div class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div class="dashboard-sidebar-brand">
+        <a href="/" class="brand">
+          <img src="/assets/morrow-logo.png" alt="Morrow" onerror="this.src='/assets/morrow-mark.png'">
+        </a>
+      </div>
+      
+      <nav class="dashboard-nav">
+        <div class="dashboard-nav-section">
+          <div class="dashboard-nav-label">Analytics</div>
+          <a href="/analyst.html" class="dashboard-nav-link active">
+            <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18M7 14l4-4 4 3 6-7"/></svg>
+            <span>Overview</span>
+          </a>
+          <a href="/analyst.html#transactions" class="dashboard-nav-link">
+            <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>
+            <span>Transactions</span>
+          </a>
+        </div>
+        
+        <div class="dashboard-nav-section">
+          <div class="dashboard-nav-label">Application</div>
+          <a href="/" class="dashboard-nav-link">
+            <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span>Customer View</span>
+          </a>
+        </div>
+      </nav>
+    </aside>
+    
+    <!-- Main Content -->
+    <main class="dashboard-main">
+      <!-- Header -->
+      <div class="dashboard-topbar">
+        <div style="display: flex; align-items: center;">
+          <div class="page-context">
+            <strong>Payment Analytics</strong>
+            <small>Transaction insights and reporting</small>
+          </div>
+        </div>
+        
+        <div class="account-nav" id="account-nav">
+          <button class="btn btn-secondary btn-sm" onclick="logout()">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            Logout
+          </button>
+        </div>
+      </div>
+      
+      <!-- Page Header -->
+      <div class="page-header">
+        <div class="page-header-top">
+          <div>
+            <h1>Payment Analytics</h1>
+            <p>Real-time transaction monitoring and revenue insights</p>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn btn-secondary" onclick="refreshData()">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- KPI Cards -->
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi-card">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+      
+      <!-- Transaction Explorer -->
+      <div class="section-card">
+        <div class="section-header">
+          <h2>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>
+            Transaction Explorer
+          </h2>
+          <div class="section-header-actions">
+            <input type="text" id="search-input" class="filter-input" placeholder="Search transactions..." style="min-width: 240px;">
+          </div>
+        </div>
+        
+        <div id="ag-grid-container" class="ag-theme-alpine" style="height: 600px; width: 100%;"></div>
+      </div>
+      
+      <!-- AG Studio Notice -->
+      <div class="section-card" style="border: 2px dashed var(--line); background: var(--wash);">
+        <div style="text-align: center; padding: 20px;">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 48px; height: 48px; margin: 0 auto 16px; color: var(--blue);"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <h3 style="margin: 0 0 8px 0; font-size: 16px; color: var(--ink);">AG Studio Integration</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px;">AG Studio interactive reporting is planned as a sponsor integration. Currently showing AG Grid Community for transaction exploration.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <script>
+    console.log('[ANALYST_PAGE_INITIALIZED] Analyst page script started');
+    const token = sessionStorage.getItem('session_token') || localStorage.getItem('session_token') || localStorage.getItem('pocketful.token');
+    console.log('[ANALYST_TOKEN_FOUND]', token ? 'Token exists (length: ' + token.length + ')' : 'NO TOKEN');
+    const API_BASE = window.location.origin;
+    let gridApi = null;
+    
+    // Logout
+    function logout() {
+      sessionStorage.removeItem('session_token');
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('pocketful.token');
+      window.location.href = '/';
+    }
+    
+    // Check authentication
+    if (!token) {
+      console.error('[ANALYST_AUTH_FAILED] No token found, redirecting to home');
+      window.location.href = '/';
+    } else {
+      console.log('[ANALYST_AUTH_OK] Token found, proceeding with initialization');
+    }
+    
+    // Setup account nav
+    console.log('[ANALYST_FETCH_ME] Fetching /me endpoint');
+    fetch(`${API_BASE}/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).then(r => {
+      console.log('[ANALYST_ME_RESPONSE]', r.status, r.statusText);
+      return r.json();
+    }).then(data => {
+      console.log('[ANALYST_ME_DATA]', data);
+      if (data.display_name) {
+        const accountNav = document.getElementById('account-nav');
+        accountNav.insertAdjacentHTML('afterbegin', `
+          <span style="margin-right: 16px; font-size: 14px; font-weight: 600; color: var(--ink);">${data.display_name}</span>
+        `);
+      }
+    }).catch((err) => {
+      console.error('[ANALYST_ME_ERROR]', err);
+    });
+    
+    // Fetch with auth
+    async function fetchAPI(endpoint) {
+      console.log('[ANALYST_API_REQUEST_STARTED]', endpoint);
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.status === 401 || response.status === 403) {
+        console.error('[ANALYST_API_AUTH_ERROR]', response.status);
+        const error = await response.json();
+        console.error('[ANALYST_API_ERROR_BODY]', error);
+        if (error.error.message.includes('pending')) {
+          throw new Error('Your analyst account is pending approval. Contact administrator.');
+        }
+        if (error.error.message.includes('suspended')) {
+          throw new Error('Your analyst account has been suspended. Contact administrator.');
+        }
+        if (error.error.message.includes('role required') || error.error.message.includes('PAYMENT_ANALYST')) {
+          throw new Error('Payment Analyst role required. Contact administrator.');
+        }
+        window.location.href = '/';
+        throw new Error('Session expired');
+      }
+      
+      if (!response.ok) {
+        console.error('[ANALYST_API_ERROR]', response.status, response.statusText);
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[ANALYST_API_RESPONSE_RECEIVED]', endpoint, data);
+      return data;
+    }
+    
+    // Format currency
+    function formatCurrency(amountMinor, currency) {
+      const symbols = { EUR: '€', USD: '$', GBP: '£', JPY: '¥' };
+      const minorUnits = currency === 'JPY' ? 0 : 2;
+      const amount = amountMinor / Math.pow(10, minorUnits);
+      return `${symbols[currency] || currency}${amount.toFixed(minorUnits)}`;
+    }
+    
+    // Load metrics
+    async function loadMetrics() {
+      try {
+        const overview = await fetchAPI('/api/analyst/overview');
+        console.log('Overview API response:', overview);
+        
+        const kpiGrid = document.getElementById('kpi-grid');
+        kpiGrid.innerHTML = '';
+        
+        // Total transactions
+        const totalTransactions = overview.total_transactions || 0;
+        kpiGrid.innerHTML += `
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              Total Transactions
+            </div>
+            <div class="kpi-value">${totalTransactions.toLocaleString()}</div>
+            <div class="kpi-sublabel">All payment attempts</div>
+          </div>
+        `;
+        
+        // Success rate
+        const successRate = overview.success_rate !== null && overview.success_rate !== undefined ? overview.success_rate : 0;
+        kpiGrid.innerHTML += `
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Success Rate
+            </div>
+            <div class="kpi-value">${successRate}%</div>
+            <div class="kpi-sublabel">Completed payments</div>
+          </div>
+        `;
+        
+        // Pending transactions (not in API, derived from transactions endpoint)
+        const pendingTransactions = overview.pending_transactions || 0;
+        kpiGrid.innerHTML += `
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Pending
+            </div>
+            <div class="kpi-value">${pendingTransactions.toLocaleString()}</div>
+            <div class="kpi-sublabel">Awaiting completion</div>
+          </div>
+        `;
+        
+        // Failed attempts (not in API, derived from transactions endpoint)
+        const failedAttempts = overview.failed_attempts || 0;
+        kpiGrid.innerHTML += `
+          <div class="kpi-card">
+            <div class="kpi-label">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+              Failed Attempts
+            </div>
+            <div class="kpi-value">${failedAttempts.toLocaleString()}</div>
+            <div class="kpi-sublabel">Unsuccessful captures</div>
+          </div>
+        `;
+        
+        // Captured revenue by currency
+        const capturedRevenue = overview.captured_revenue || {};
+        const currencies = Object.keys(capturedRevenue);
+        console.log('Captured revenue currencies:', currencies);
+        
+        if (currencies.length > 0) {
+          currencies.forEach(currency => {
+            const amount = capturedRevenue[currency];
+            kpiGrid.innerHTML += `
+              <div class="kpi-card">
+                <div class="kpi-label">
+                  <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  Captured Revenue (${currency})
+                </div>
+                <div class="kpi-value">${formatCurrency(amount, currency)}</div>
+                <div class="kpi-sublabel">Total settled</div>
+              </div>
+            `;
+          });
+        } else {
+          console.log('No captured revenue data available (empty state)');
+        }
+        
+      } catch (error) {
+        console.error('Failed to load metrics:', error);
+        document.getElementById('kpi-grid').innerHTML = `
+          <div class="error-state" style="grid-column: 1 / -1;">
+            <div class="error-state-icon">⚠</div>
+            <h3>Failed to load metrics</h3>
+            <p>${error.message}</p>
+            <button class="btn btn-primary" onclick="loadMetrics()">Retry</button>
+          </div>
+        `;
+      }
+    }
+    
+    // Initialize AG Grid
+    async function initGrid() {
+      const container = document.getElementById('ag-grid-container');
+      
+      try {
+        console.log('Initializing AG Grid...');
+        console.log('AG Grid library loaded:', typeof agGrid !== 'undefined');
+        
+        if (typeof agGrid === 'undefined') {
+          throw new Error('AG Grid library not loaded');
+        }
+        
+        container.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading transactions...</p></div>';
+        
+        console.log('Fetching transactions...');
+        const response = await fetchAPI('/api/analyst/transactions?limit=1000');
+        console.log('Transactions API response:', response);
+        const transactions = response.transactions;
+        console.log('Transactions array:', transactions, 'Length:', transactions.length);
+        
+        container.innerHTML = '';
+        
+        if (transactions.length === 0) {
+          console.log('No transactions, showing empty state');
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">📊</div>
+              <h3>No transactions yet</h3>
+              <p>Transaction data will appear here as payments are processed through the system.</p>
+            </div>
+          `;
+          return;
+        }
+        
+        const columnDefs = [
+          { 
+            field: 'checkout_id', 
+            headerName: 'Transaction ID', 
+            filter: 'agTextColumnFilter',
+            minWidth: 180,
+            cellRenderer: params => `<code style="font-size: 12px;">${params.value}</code>`
+          },
+          { 
+            field: 'buyer_id', 
+            headerName: 'Buyer', 
+            filter: 'agTextColumnFilter',
+            minWidth: 140,
+            valueFormatter: params => params.value ? `User ${params.value.substring(0, 8)}...` : 'Anonymous'
+          },
+          { 
+            field: 'amount_display', 
+            headerName: 'Amount', 
+            filter: 'agNumberColumnFilter',
+            minWidth: 120,
+            valueGetter: params => {
+              const minor = params.data.amount_minor;
+              const currency = params.data.currency;
+              const minorUnits = currency === 'JPY' ? 0 : 2;
+              return minor / Math.pow(10, minorUnits);
+            },
+            valueFormatter: params => {
+              if (!params.value) return '';
+              const currency = params.data.currency;
+              const symbols = { EUR: '€', USD: '$', GBP: '£', JPY: '¥' };
+              const minorUnits = currency === 'JPY' ? 0 : 2;
+              return `${symbols[currency] || currency}${params.value.toFixed(minorUnits)}`;
+            },
+            cellStyle: { fontWeight: '600', fontVariantNumeric: 'tabular-nums' }
+          },
+          { 
+            field: 'currency', 
+            headerName: 'Currency', 
+            filter: 'agTextColumnFilter',
+            width: 100
+          },
+          { 
+            field: 'status', 
+            headerName: 'Status', 
+            filter: 'agTextColumnFilter',
+            cellRenderer: params => {
+              const status = params.value;
+              let badgeClass = 'badge-info';
+              if (status === 'COMPLETED') badgeClass = 'badge-completed';
+              else if (status === 'CAPTURE_FAILED' || status === 'FAILED') badgeClass = 'badge-failed';
+              else if (status === 'APPROVED' || status === 'CAPTURE_PENDING') badgeClass = 'badge-pending';
+              return `<span class="badge ${badgeClass}">${status}</span>`;
+            }
+          },
+          { 
+            field: 'note', 
+            headerName: 'Note', 
+            filter: 'agTextColumnFilter',
+            flex: 1,
+            minWidth: 200
+          },
+          { 
+            field: 'created_at', 
+            headerName: 'Created', 
+            filter: 'agDateColumnFilter',
+            minWidth: 160,
+            valueFormatter: params => params.value ? new Date(params.value).toLocaleString() : ''
+          }
+        ];
+        
+        const gridOptions = {
+          columnDefs: columnDefs,
+          rowData: transactions,
+          defaultColDef: {
+            resizable: true,
+            sortable: true,
+            filter: true
+          },
+          pagination: true,
+          paginationPageSize: 50,
+          paginationPageSizeSelector: [25, 50, 100, 200],
+          animateRows: true,
+          enableCellTextSelection: true,
+          onFirstDataRendered: params => {
+            params.api.sizeColumnsToFit();
+          }
+        };
+        
+        const grid = agGrid.createGrid(container, gridOptions);
+        gridApi = grid;
+        
+        // Search functionality
+        document.getElementById('search-input').addEventListener('input', e => {
+          gridApi.setGridOption('quickFilterText', e.target.value);
+        });
+        
+        console.log('AG Grid initialized with', transactions.length, 'transactions');
+        
+      } catch (error) {
+        console.error('AG Grid initialization failed:', error);
+        container.innerHTML = `
+          <div class="error-state">
+            <div class="error-state-icon">⚠</div>
+            <h3>Failed to load transaction data</h3>
+            <p>${error.message}</p>
+            <button class="btn btn-primary" onclick="initGrid()">Retry</button>
+          </div>
+        `;
+      }
+    }
+    
+    // Refresh all data
+    async function refreshData() {
+      await Promise.all([loadMetrics(), initGrid()]);
+    }
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadMetrics();
+      await initGrid();
+    });
+  </script>
+</body>
+</html>

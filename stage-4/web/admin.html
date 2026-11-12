@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Morrow Administration — Analyst management">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/morrow-mark.png">
+  <title>Administration — Morrow</title>
+  <link rel="stylesheet" href="/assets/pocketful.css">
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <div class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div class="dashboard-sidebar-brand">
+        <a href="/" class="brand">
+          <img src="/assets/morrow-logo.png" alt="Morrow" onerror="this.src='/assets/morrow-mark.png'">
+        </a>
+      </div>
+      
+      <nav class="dashboard-nav">
+        <div class="dashboard-nav-section">
+          <div class="dashboard-nav-label">Administration</div>
+          <a href="/admin.html" class="dashboard-nav-link active">
+            <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Analyst Management</span>
+          </a>
+        </div>
+        
+        <div class="dashboard-nav-section">
+          <div class="dashboard-nav-label">Application</div>
+          <a href="/" class="dashboard-nav-link">
+            <svg class="dashboard-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span>Customer View</span>
+          </a>
+        </div>
+      </nav>
+    </aside>
+    
+    <!-- Main Content -->
+    <main class="dashboard-main">
+      <!-- Header -->
+      <div class="dashboard-topbar">
+        <div style="display: flex; align-items: center;">
+          <div class="page-context">
+            <strong>Administrator</strong>
+            <small>Analyst account management</small>
+          </div>
+        </div>
+        
+        <div class="account-nav" id="account-nav">
+          <button class="btn btn-secondary btn-sm" onclick="logout()">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            Logout
+          </button>
+        </div>
+      </div>
+      
+      <!-- Page Header -->
+      <div class="page-header">
+        <div class="page-header-top">
+          <div>
+            <h1>Analyst Management</h1>
+            <p>Approve, suspend, and manage payment analyst accounts</p>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn btn-secondary" onclick="loadAnalysts()">
+              <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Status Summary -->
+      <div class="kpi-grid" id="status-summary">
+        <div class="kpi-card">
+          <div class="loading-spinner"></div>
+        </div>
+      </div>
+      
+      <!-- Analyst Table -->
+      <div class="section-card">
+        <div class="section-header">
+          <h2>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Payment Analysts
+          </h2>
+          <div class="section-header-actions">
+            <select id="status-filter" class="filter-select">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="suspended">Suspended</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+        </div>
+        
+        <div id="analysts-container">
+          <div class="loading-state">
+            <div class="loading-spinner"></div>
+            <p>Loading analysts...</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <!-- Suspend Modal -->
+  <div id="suspend-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Suspend Analyst</h2>
+      </div>
+      <div class="modal-body">
+        <label for="suspend-reason">Reason for suspension</label>
+        <textarea id="suspend-reason" placeholder="e.g., Policy violation, suspicious activity, etc." rows="4"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeSuspendModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmSuspend()">Suspend Analyst</button>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    console.log('[ADMIN_PAGE_INITIALIZED] Admin page script started');
+    const token = sessionStorage.getItem('session_token') || localStorage.getItem('session_token') || localStorage.getItem('pocketful.token');
+    console.log('[ADMIN_TOKEN_FOUND]', token ? 'Token exists (length: ' + token.length + ')' : 'NO TOKEN');
+    const API_BASE = window.location.origin;
+    let currentSuspendTarget = null;
+    
+    // Logout
+    function logout() {
+      sessionStorage.removeItem('session_token');
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('pocketful.token');
+      window.location.href = '/';
+    }
+    
+    // Check authentication
+    if (!token) {
+      console.error('[ADMIN_AUTH_FAILED] No token found, redirecting to home');
+      window.location.href = '/';
+    } else {
+      console.log('[ADMIN_AUTH_OK] Token found, proceeding with initialization');
+    }
+    
+    // Setup account nav
+    console.log('[ADMIN_FETCH_ME] Fetching /me endpoint');
+    fetch(`${API_BASE}/me`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).then(r => {
+      console.log('[ADMIN_ME_RESPONSE]', r.status, r.statusText);
+      return r.json();
+    }).then(data => {
+      console.log('[ADMIN_ME_DATA]', data);
+      if (data.display_name) {
+        const accountNav = document.getElementById('account-nav');
+        accountNav.insertAdjacentHTML('afterbegin', `
+          <span style="margin-right: 16px; font-size: 14px; font-weight: 600; color: var(--ink);">${data.display_name}</span>
+        `);
+      }
+    }).catch((err) => {
+      console.error('[ADMIN_ME_ERROR]', err);
+    });
+    
+    // Fetch with auth
+    async function fetchAPI(endpoint, options = {}) {
+      console.log('[ADMIN_API_REQUEST_STARTED]', endpoint, options);
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...options.headers
+        }
+      });
+      
+      if (response.status === 401 || response.status === 403) {
+        console.error('[ADMIN_API_AUTH_ERROR]', response.status);
+        const error = await response.json();
+        console.error('[ADMIN_API_ERROR_BODY]', error);
+        if (error.error.message.includes('admin role required') || error.error.message.includes('PLATFORM_ADMIN')) {
+          alert('Admin role required. You must be a PLATFORM_ADMIN to access this page.');
+          window.location.href = '/';
+          throw new Error('Unauthorized');
+        }
+        window.location.href = '/';
+        throw new Error('Session expired');
+      }
+      
+      if (!response.ok) {
+        console.error('[ADMIN_API_ERROR]', response.status, response.statusText);
+        const error = await response.json();
+        console.error('[ADMIN_API_ERROR_BODY]', error);
+        throw new Error(error.error?.message || 'API error');
+      }
+      
+      const data = await response.json();
+      console.log('[ADMIN_API_RESPONSE_RECEIVED]', endpoint, data);
+      return data;
+    }
+    
+    // Load status summary
+    async function loadStatusSummary(analysts) {
+      const summary = {
+        total: analysts.length,
+        pending: analysts.filter(a => a.analyst_status === 'pending').length,
+        approved: analysts.filter(a => a.analyst_status === 'approved').length,
+        suspended: analysts.filter(a => a.analyst_status === 'suspended').length
+      };
+      
+      const summaryContainer = document.getElementById('status-summary');
+      summaryContainer.innerHTML = `
+        <div class="kpi-card">
+          <div class="kpi-label">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/></svg>
+            Total Analysts
+          </div>
+          <div class="kpi-value">${summary.total}</div>
+          <div class="kpi-sublabel">All registered analysts</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Pending
+          </div>
+          <div class="kpi-value">${summary.pending}</div>
+          <div class="kpi-sublabel">Awaiting approval</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Approved
+          </div>
+          <div class="kpi-value">${summary.approved}</div>
+          <div class="kpi-sublabel">Active analysts</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+            Suspended
+          </div>
+          <div class="kpi-value">${summary.suspended}</div>
+          <div class="kpi-sublabel">Access revoked</div>
+        </div>
+      `;
+    }
+    
+    // Load analysts
+    async function loadAnalysts() {
+      const container = document.getElementById('analysts-container');
+      container.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading analysts...</p></div>';
+      
+      try {
+        const statusFilter = document.getElementById('status-filter').value;
+        const url = statusFilter 
+          ? `/api/admin/analysts?status=${statusFilter}` 
+          : '/api/admin/analysts';
+        
+        console.log('Fetching analysts from:', url);
+        const data = await fetchAPI(url);
+        console.log('API response:', data);
+        const analysts = data.analysts;
+        console.log('Analysts array:', analysts, 'Length:', analysts.length);
+        
+        // Update summary
+        console.log('Updating status summary...');
+        await loadStatusSummary(analysts);
+        console.log('Status summary updated');
+        
+        if (analysts.length === 0) {
+          console.log('No analysts found, showing empty state');
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">👥</div>
+              <h3>No analysts found</h3>
+              <p>No payment analysts are currently registered with status: ${statusFilter || 'any'}.</p>
+              <p style="margin-top: 12px;">Analysts can sign up at <a href="/signup" style="color: var(--blue); text-decoration: underline;">/signup</a> with role "PAYMENT_ANALYST".</p>
+            </div>
+          `;
+          return;
+        }
+        
+        console.log('Rendering', analysts.length, 'analysts in table');
+        let html = `
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Analyst</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        analysts.forEach(analyst => {
+          const statusClass = `badge-${analyst.analyst_status}`;
+          const requested = analyst.analyst_requested_at 
+            ? new Date(analyst.analyst_requested_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : 'N/A';
+          
+          html += `
+            <tr>
+              <td>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--blue-pale); color: var(--blue); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;">
+                    ${analyst.display_name ? analyst.display_name.charAt(0).toUpperCase() : analyst.handle.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div style="font-weight: 600; color: var(--ink);">${analyst.display_name || analyst.handle}</div>
+                    <div style="font-size: 12px; color: var(--muted);">@${analyst.handle}</div>
+                  </div>
+                </div>
+              </td>
+              <td style="color: var(--muted);">${analyst.email}</td>
+              <td><span class="badge ${statusClass}">${analyst.analyst_status}</span></td>
+              <td style="color: var(--muted);">${requested}</td>
+              <td>
+                <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          `;
+          
+          if (analyst.analyst_status === 'pending') {
+            html += `<button class="btn btn-success btn-sm" onclick="approveAnalyst('${analyst.user_id}')">Approve</button>`;
+          }
+          
+          if (analyst.analyst_status === 'approved') {
+            html += `<button class="btn btn-danger btn-sm" onclick="openSuspendModal('${analyst.user_id}')">Suspend</button>`;
+          }
+          
+          if (analyst.analyst_status === 'suspended') {
+            html += `<button class="btn btn-secondary btn-sm" onclick="reinstateAnalyst('${analyst.user_id}')">Reinstate</button>`;
+          }
+          
+          html += `
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+        
+        html += '</tbody></table>';
+        console.log('Setting table HTML, length:', html.length);
+        container.innerHTML = html;
+        console.log('Table rendered successfully');
+        
+      } catch (error) {
+        console.error('Failed to load analysts:', error);
+        container.innerHTML = `
+          <div class="error-state">
+            <div class="error-state-icon">⚠</div>
+            <h3>Failed to load analysts</h3>
+            <p>${error.message}</p>
+            <button class="btn btn-primary" onclick="loadAnalysts()">Retry</button>
+          </div>
+        `;
+      }
+    }
+    
+    // Approve analyst
+    async function approveAnalyst(userId) {
+      if (!confirm('Approve this analyst? They will gain access to payment analytics.')) {
+        return;
+      }
+      
+      try {
+        await fetchAPI(`/api/admin/analysts/${userId}/approve`, { method: 'POST' });
+        alert('Analyst approved successfully');
+        await loadAnalysts();
+      } catch (error) {
+        alert(`Failed to approve analyst: ${error.message}`);
+      }
+    }
+    
+    // Open suspend modal
+    function openSuspendModal(userId) {
+      currentSuspendTarget = userId;
+      document.getElementById('suspend-reason').value = '';
+      document.getElementById('suspend-modal').classList.add('active');
+    }
+    
+    // Close suspend modal
+    function closeSuspendModal() {
+      currentSuspendTarget = null;
+      document.getElementById('suspend-modal').classList.remove('active');
+    }
+    
+    // Confirm suspend
+    async function confirmSuspend() {
+      const reason = document.getElementById('suspend-reason').value.trim();
+      
+      if (!reason) {
+        alert('Please provide a reason for suspension');
+        return;
+      }
+      
+      try {
+        await fetchAPI(`/api/admin/analysts/${currentSuspendTarget}/suspend`, {
+          method: 'POST',
+          body: JSON.stringify({ reason })
+        });
+        alert('Analyst suspended successfully');
+        closeSuspendModal();
+        await loadAnalysts();
+      } catch (error) {
+        alert(`Failed to suspend analyst: ${error.message}`);
+      }
+    }
+    
+    // Reinstate analyst
+    async function reinstateAnalyst(userId) {
+      if (!confirm('Reinstate this analyst? They will regain access to payment analytics.')) {
+        return;
+      }
+      
+      try {
+        await fetchAPI(`/api/admin/analysts/${userId}/reinstate`, { method: 'POST' });
+        alert('Analyst reinstated successfully');
+        await loadAnalysts();
+      } catch (error) {
+        alert(`Failed to reinstate analyst: ${error.message}`);
+      }
+    }
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', loadAnalysts);
+    document.getElementById('status-filter').addEventListener('change', loadAnalysts);
+    
+    // Close modal on outside click
+    document.getElementById('suspend-modal').addEventListener('click', e => {
+      if (e.target.id === 'suspend-modal') {
+        closeSuspendModal();
+      }
+    });
+  </script>
+</body>
+</html>

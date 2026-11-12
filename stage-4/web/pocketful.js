@@ -1350,6 +1350,7 @@
 
   function buildSplit() {
     main.replaceChildren(pageHeading("Make it even", "Split a shared cost", "Divide the amount in minor units. The first handles in your list receive any remainder."));
+    const container = node("div", "split-form-container");
     const panel = node("section", "panel");
     panel.append(panelHeading("Create a split", "Preview the exact shares before you send requests."));
     const form = document.createElement("form"); form.className = "form-grid"; form.noValidate = true;
@@ -1361,7 +1362,7 @@
     const previewRegion = node("div"); previewRegion.id = "split-preview-region";
     const submit = testNode("button", "split-submit", "primary-button", "Create requests"); submit.type = "submit";
     form.append(feedback, amount.wrap, handles.wrap, note.wrap, previewRegion, submit);
-    panel.append(form); main.append(panel);
+    panel.append(form); container.append(panel); main.append(container);
     const tracker = operationTracker();
     for (const input of [amount.input, handles.input, note.input]) input.addEventListener("input", () => { tracker.changed(); clearMessage(feedback, "split-error"); refreshSplitPreview(previewRegion, amount.input.value, handles.input.value); });
     form.addEventListener("submit", async event => {
@@ -1527,7 +1528,7 @@
     const signup = mode === "signup";
     const panel = node("section", "panel auth-card");
     const logo = node("div", "auth-brand");
-    logo.innerHTML = '<a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo brand-mark" src="/assets/assets/morrow-mark.png" alt=""><span class="brand-copy"><strong>morrow</strong><small>your money for tomorrow</small></span></a>';
+    logo.innerHTML = '<a class="brand" href="/" aria-label="Morrow home"><img class="brand-logo brand-mark" src="/assets/morrow-mark.png" alt=""><span class="brand-copy"><strong>morrow</strong><small>your money for tomorrow</small></span></a>';
     panel.append(logo, node("p", "eyebrow auth-eyebrow", signup ? "A fresh start" : "Welcome back"), node("h1", "", signup ? "Create your account" : "Good to have you back"), node("p", "lede auth-lede", signup ? "Build a clearer picture of your money, one step at a time." : "Sign in to see your wallet and what comes next."));
     const form = document.createElement("form"); form.className = "form-grid auth-form"; form.noValidate = true;
     const feedback = node("div", "notice-list auth-feedback");
@@ -1630,6 +1631,30 @@
           return;
         }
         state.token = result.data.token; localStorage.setItem(tokenKey, state.token);
+        // Store token in sessionStorage for admin/analyst pages
+        sessionStorage.setItem('session_token', state.token);
+        
+        // Check if user has special roles and redirect accordingly
+        try {
+          const meResult = await api("/me");
+          if (meResult.response.ok && meResult.data) {
+            const roles = meResult.data.roles || [];
+            // Admin gets priority
+            if (roles.includes('PLATFORM_ADMIN')) {
+              location.assign('/admin.html');
+              return;
+            }
+            // Then analyst
+            if (roles.includes('PAYMENT_ANALYST')) {
+              location.assign('/analyst.html');
+              return;
+            }
+          }
+        } catch (e) {
+          // If /me fails, continue with normal flow
+          console.error('Failed to check user roles:', e);
+        }
+        
         if (signup) {
           redirectingAfterSignup = true;
           submit.textContent = "Account created";

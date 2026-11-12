@@ -1,0 +1,3 @@
+# Production dependencies
+psycopg2-binary==2.9.9
+google-cloud-secret-manager==2.16.4

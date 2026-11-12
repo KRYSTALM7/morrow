@@ -74,7 +74,7 @@ def test_legacy_plaintext_snapshot_migrates_without_losing_wallet_data(tmp_path)
     assert '"tokens"' not in state_json
     assert token_hash == hashlib.sha256(raw.encode()).hexdigest()
     assert expires_at == "2099-01-01T00:00:00+00:00"
-    assert version == 4
+    assert version == 6  # Current latest migration version
     # The application has no backup writer; also ensure the live database and SQLite
     # sidecars contain no legacy token text after migration/checkpoint/vacuum.
     for path in (db_path, tmp_path / "legacy-wallet.sqlite3-wal",

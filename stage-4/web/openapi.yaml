@@ -1,0 +1,481 @@
+openapi: 3.0.3
+info:
+  title: Morrow API
+  version: 4.0.0
+  description: |
+    Morrow payment platform API - Customer wallet, PayPal checkout integration, 
+    financial planning features, payment analyst dashboard, and platform administration.
+    
+    ## Authentication
+    Most endpoints require Bearer token authentication. Obtain a token via `/auth/login` or `/auth/signup`.
+    
+servers:
+  - url: http://localhost:8086
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User signup and login
+  - name: Customer
+    description: Wallet operations for customers
+  - name: PayPal
+    description: PayPal Sandbox checkout integration
+  - name: Financial Planning
+    description: Commitments, shared expenses, and forecasting
+  - name: Analyst
+    description: Payment analytics for approved analysts
+  - name: Admin
+    description: Platform administration
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: validation_failed
+            message:
+              type: string
+              example: Invalid request parameters
+
+paths:
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      summary: Create new account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, display_name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  example: SecurePassword123
+                display_name:
+                  type: string
+                  example: Jane Doe
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  display_name:
+                    type: string
+                  token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                    
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login to existing account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@morrow.local
+                password:
+                  type: string
+                  example: MorrowAdmin2026!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  display_name:
+                    type: string
+                  token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+                
+  /me:
+    get:
+      tags: [Customer]
+      summary: Get current user information
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  email:
+                    type: string
+                  display_name:
+                    type: string
+                  handle:
+                    type: string
+                  roles:
+                    type: array
+                    items:
+                      type: string
+                      enum: [CUSTOMER, PAYMENT_ANALYST, PLATFORM_ADMIN]
+                  balance:
+                    type: integer
+                  currency:
+                    type: string
+                  minor_units:
+                    type: integer
+                    
+  /payments:
+    post:
+      tags: [Customer]
+      summary: Send payment to another user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, amount]
+              properties:
+                to:
+                  type: string
+                  description: Recipient handle or user ID
+                amount:
+                  type: integer
+                  description: Amount in minor units
+                note:
+                  type: string
+                visibility:
+                  type: string
+                  enum: [public, private]
+      responses:
+        '200':
+          description: Payment created
+          
+  /requests:
+    get:
+      tags: [Customer]
+      summary: List payment requests
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of requests
+          
+    post:
+      tags: [Customer]
+      summary: Create payment request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, amount]
+              properties:
+                from:
+                  type: string
+                amount:
+                  type: integer
+                note:
+                  type: string
+      responses:
+        '200':
+          description: Request created
+          
+  /paypal/checkout:
+    post:
+      tags: [PayPal]
+      summary: Create PayPal Sandbox checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, note]
+              properties:
+                amount:
+                  type: integer
+                  description: Amount in minor units
+                currency:
+                  type: string
+                  enum: [EUR, USD, GBP, JPY]
+                note:
+                  type: string
+      responses:
+        '200':
+          description: Checkout created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout_id:
+                    type: string
+                  approval_url:
+                    type: string
+                    
+  /api/analyst/overview:
+    get:
+      tags: [Analyst]
+      summary: Get aggregated payment analytics
+      description: Approved analysts only
+      responses:
+        '200':
+          description: Analytics overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  captured_revenue:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  pending_transactions:
+                    type: integer
+                  failed_attempts:
+                    type: integer
+                  success_rate:
+                    type: number
+                    nullable: true
+                  total_transactions:
+                    type: integer
+                  average_transaction_value:
+                    type: object
+        '403':
+          description: Analyst access required or account not approved
+          
+  /api/analyst/transactions:
+    get:
+      tags: [Analyst]
+      summary: List all PayPal transactions
+      description: Approved analysts only
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 1000
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [CREATED, APPROVED, COMPLETED, CAPTURE_FAILED, FAILED]
+      responses:
+        '200':
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        checkout_id:
+                          type: string
+                        buyer_id:
+                          type: string
+                        amount_minor:
+                          type: integer
+                        currency:
+                          type: string
+                        status:
+                          type: string
+                        note:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+                        updated_at:
+                          type: string
+                          format: date-time
+                  total_count:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  has_more:
+                    type: boolean
+                    
+  /api/admin/analysts:
+    get:
+      tags: [Admin]
+      summary: List all analyst accounts
+      description: Platform admin only
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, suspended, rejected]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Analyst list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analysts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id:
+                          type: string
+                        email:
+                          type: string
+                        display_name:
+                          type: string
+                        handle:
+                          type: string
+                        analyst_status:
+                          type: string
+                          enum: [pending, approved, suspended, rejected]
+                        analyst_requested_at:
+                          type: string
+                          format: date-time
+                  total_count:
+                    type: integer
+        '403':
+          description: Admin access required
+          
+  /api/admin/analysts/{user_id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve pending analyst
+      description: Platform admin only
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Analyst approved
+        '403':
+          description: Admin access required
+        '404':
+          description: User not found
+          
+  /api/admin/analysts/{user_id}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend approved analyst
+      description: Platform admin only
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  example: Policy violation
+      responses:
+        '200':
+          description: Analyst suspended
+        '403':
+          description: Admin access required
+          
+  /api/admin/analysts/{user_id}/reinstate:
+    post:
+      tags: [Admin]
+      summary: Reinstate suspended analyst
+      description: Platform admin only
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Analyst reinstated
+        '403':
+          description: Admin access required

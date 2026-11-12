@@ -1,14 +1,17 @@
-"""SQLite-backed commitments and shared-expense records, separate from the wallet ledger."""
+"""Commitments and shared-expense records (PostgreSQL or SQLite)."""
 from __future__ import annotations
 
 import calendar
 import hashlib
 import json
-import sqlite3
+import os
 import threading
 import uuid
 from contextlib import closing
 from datetime import date, datetime, timezone
+
+from db_adapter import get_connection
+from db_config import get_database_config
 
 
 def utc_now() -> str:
@@ -61,19 +64,22 @@ def _due_date(anchor_text: str, frequency: str, interval_days: int | None,
 
 
 class FinanceStore:
-    """Versioned SQLite storage with owner-scoped records and atomic idempotent writes."""
+    """Versioned storage with owner-scoped records and atomic idempotent writes."""
 
-    def __init__(self, path: str):
-        self.path = path
+    def __init__(self, path=None):
+        config = get_database_config()
+        self.db_type = config['type']
+        
+        if self.db_type == 'sqlite':
+            self.path = path or config['paths']['finance']
+        else:
+            self.path = None
+        
         self._lock = threading.RLock()
         self._migrate()
 
     def _connect(self):
-        db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA busy_timeout=10000")
-        return db
+        return get_connection('finance', self.path)
 
     def _migrate(self):
         with self._lock, closing(self._connect()) as db:

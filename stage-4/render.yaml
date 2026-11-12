@@ -1,0 +1,44 @@
+# Render Blueprint for Morrow Stage-4 - FREE TIER
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # Backend API (Python Web Service) - FREE
+  - type: web
+    name: morrow-backend
+    env: python
+    region: oregon
+    plan: free  # FREE tier
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com  # Sandbox only
+      # Secrets - set in Render dashboard
+      - key: DATABASE_URL
+        sync: false  # Neon PostgreSQL connection string
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false  # Optional
+
+  # Frontend (Static Site) - FREE
+  - type: web
+    name: morrow-frontend
+    env: static
+    buildCommand: "echo 'No build required'"
+    staticPublishPath: ./web
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

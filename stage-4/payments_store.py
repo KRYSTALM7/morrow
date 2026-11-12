@@ -1,12 +1,14 @@
-"""SQLite persistence for external PayPal checkout operations (never the social ledger)."""
+"""PostgreSQL or SQLite persistence for external PayPal checkout operations (never the social ledger)."""
 from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import threading
 from contextlib import closing
 from datetime import datetime, timezone
+
+from db_adapter import get_connection
+from db_config import get_database_config
 
 
 def utc_now() -> str:
@@ -14,19 +16,22 @@ def utc_now() -> str:
 
 
 class CheckoutStore:
-    """Small SQLite store with versioned schema and append-only operation audit."""
+    """Small store with versioned schema and append-only operation audit."""
 
-    def __init__(self, path: str):
-        self.path = path
+    def __init__(self, path=None):
+        config = get_database_config()
+        self.db_type = config['type']
+        
+        if self.db_type == 'sqlite':
+            self.path = path or config['paths']['payments']
+        else:
+            self.path = None
+        
         self._lock = threading.RLock()
         self._migrate()
 
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=10000")
-        return connection
+        return get_connection('payments', self.path)
 
     def _migrate(self):
         with self._lock, closing(self._connect()) as db:

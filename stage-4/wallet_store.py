@@ -1,13 +1,15 @@
-"""Transactional SQLite persistence for the Stage 4 wallet state snapshot."""
+"""Transactional persistence for Stage 4 wallet state (PostgreSQL or SQLite)."""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import sqlite3
 import threading
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
+
+from db_adapter import get_connection
+from db_config import get_database_config
 
 
 def utc_now():
@@ -15,22 +17,25 @@ def utc_now():
 
 
 class WalletStore:
-    """Versioned canonical wallet snapshot; each dispatch is serialized by SQLite."""
+    """Versioned canonical wallet snapshot with PostgreSQL or SQLite backend."""
 
-    def __init__(self, path):
-        self.path = os.path.abspath(path)
+    def __init__(self, path=None):
+        config = get_database_config()
+        self.db_type = config['type']
+        
+        if self.db_type == 'sqlite':
+            self.path = path or config['paths']['wallet']
+            self.path = os.path.abspath(self.path)
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        else:
+            self.path = None  # PostgreSQL doesn't use file path
+        
         self._lock = threading.RLock()
         self._local = threading.local()
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         self._migrate()
 
     def _connect(self):
-        db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA busy_timeout=15000")
-        db.execute("PRAGMA secure_delete=ON")
-        return db
+        return get_connection('wallet', self.path)
 
     def _migrate(self):
         with self._lock, closing(self._connect()) as db:
@@ -123,6 +128,90 @@ class WalletStore:
                     if db.in_transaction:
                         db.execute("ROLLBACK")
                     raise
+                version = 4
+            if version < 5:
+                # Add roles array to user objects in JSON state.
+                # Default all existing users to CUSTOMER role for backward compatibility.
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    current_version = db.execute(
+                        "SELECT COALESCE(MAX(version),0) FROM wallet_schema_migrations").fetchone()[0]
+                    if current_version < 5:
+                        row = db.execute(
+                            "SELECT state_json, state_version FROM wallet_state WHERE singleton=1"
+                        ).fetchone()
+                        
+                        if row:
+                            state = json.loads(row["state_json"])
+                            
+                            # Add roles to each user (default: CUSTOMER for backward compatibility)
+                            for user_id, user in state.get("users", {}).items():
+                                if "roles" not in user:
+                                    user["roles"] = ["CUSTOMER"]
+                                    # No analyst_status field for existing customers
+                            
+                            # Save updated state (increment state_version)
+                            new_state_version = row["state_version"] + 1
+                            db.execute(
+                                "UPDATE wallet_state SET state_json=?, state_version=?, updated_at=? WHERE singleton=1",
+                                (json.dumps(state, sort_keys=True, separators=(",", ":")), 
+                                 new_state_version, 
+                                 utc_now())
+                            )
+                        
+                        # Record schema migration
+                        db.execute(
+                            "INSERT INTO wallet_schema_migrations(version, applied_at) VALUES(5, ?)",
+                            (utc_now(),)
+                        )
+                    db.execute("COMMIT")
+                except Exception:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
+                version = 5
+            if version < 6:
+                # Create admin_actions table for persistent append-only audit trail
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    current_version = db.execute(
+                        "SELECT COALESCE(MAX(version),0) FROM wallet_schema_migrations").fetchone()[0]
+                    if current_version < 6:
+                        db.execute("""
+                            CREATE TABLE IF NOT EXISTS admin_actions (
+                              action_id TEXT PRIMARY KEY,
+                              action_type TEXT NOT NULL,
+                              actor_user_id TEXT NOT NULL,
+                              target_user_id TEXT NOT NULL,
+                              reason TEXT,
+                              metadata_json TEXT,
+                              created_at TEXT NOT NULL,
+                              
+                              CHECK(action_type IN (
+                                'approve_analyst',
+                                'suspend_analyst',
+                                'reinstate_analyst',
+                                'reject_analyst',
+                                'assign_role',
+                                'remove_role',
+                                'create_admin'
+                              ))
+                            )
+                        """)
+                        db.execute("CREATE INDEX IF NOT EXISTS admin_actions_actor ON admin_actions(actor_user_id, created_at DESC)")
+                        db.execute("CREATE INDEX IF NOT EXISTS admin_actions_target ON admin_actions(target_user_id, created_at DESC)")
+                        db.execute("CREATE INDEX IF NOT EXISTS admin_actions_type ON admin_actions(action_type, created_at DESC)")
+                        
+                        db.execute(
+                            "INSERT INTO wallet_schema_migrations(version, applied_at) VALUES(6, ?)",
+                            (utc_now(),)
+                        )
+                    db.execute("COMMIT")
+                except Exception:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
+                version = 6
         try:
             os.chmod(self.path, 0o600)
         except OSError:
@@ -271,6 +360,56 @@ class WalletStore:
             return
         with self._lock, closing(self._connect()) as connection:
             connection.execute("DELETE FROM wallet_auth_attempts")
+
+    def log_admin_action(self, action_id, action_type, actor_user_id, target_user_id, reason=None, metadata=None):
+        """Insert admin action into append-only audit log."""
+        db = getattr(self._local, "db", None)
+        if db is None or not db.in_transaction:
+            raise RuntimeError("Admin action logging requires an active transaction")
+        db.execute("""
+            INSERT INTO admin_actions (action_id, action_type, actor_user_id, target_user_id, reason, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            action_id,
+            action_type,
+            actor_user_id,
+            target_user_id,
+            reason,
+            json.dumps(metadata) if metadata else None,
+            utc_now()
+        ))
+
+    def get_admin_actions(self, target_user_id=None, actor_user_id=None, limit=100):
+        """Query admin actions from audit log (read-only, no transaction required)."""
+        with self._lock, closing(self._connect()) as db:
+            if target_user_id:
+                rows = db.execute(
+                    "SELECT * FROM admin_actions WHERE target_user_id=? ORDER BY created_at DESC LIMIT ?",
+                    (target_user_id, limit)
+                ).fetchall()
+            elif actor_user_id:
+                rows = db.execute(
+                    "SELECT * FROM admin_actions WHERE actor_user_id=? ORDER BY created_at DESC LIMIT ?",
+                    (actor_user_id, limit)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM admin_actions ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            
+            return [
+                {
+                    "action_id": row["action_id"],
+                    "action_type": row["action_type"],
+                    "actor_user_id": row["actor_user_id"],
+                    "target_user_id": row["target_user_id"],
+                    "reason": row["reason"],
+                    "metadata": json.loads(row["metadata_json"]) if row["metadata_json"] else None,
+                    "created_at": row["created_at"]
+                }
+                for row in rows
+            ]
 
     def health(self):
         with self._lock, closing(self._connect()) as db:

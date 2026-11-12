@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Documentation — Morrow</title>
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/morrow-mark.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: #000;
+    }
+    
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+    }
+    
+    .brand-copy strong {
+      font-size: 1.25rem;
+      display: block;
+      line-height: 1;
+    }
+    
+    .brand-copy small {
+      font-size: 0.75rem;
+      color: #666;
+      display: block;
+      line-height: 1;
+    }
+    
+    .swagger-container {
+      max-width: 1460px;
+      margin: 0 auto;
+    }
+    
+    .swagger-ui .topbar {
+      display: none;
+    }
+    
+    #swagger-ui {
+      padding-top: 0;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Morrow home">
+      <img class="brand-logo" src="/assets/morrow-mark.png" alt="">
+      <span class="brand-copy">
+        <strong>morrow</strong>
+        <small>api documentation</small>
+      </span>
+    </a>
+    <div>
+      <a href="/" style="padding: 0.5rem 1rem; color: #666; text-decoration: none;">Back to App</a>
+    </div>
+  </header>
+  
+  <div class="swagger-container">
+    <div id="swagger-ui"></div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      // Check if user has a token for authentication
+      const token = sessionStorage.getItem('session_token') || 
+                   localStorage.getItem('session_token') || 
+                   localStorage.getItem('pocketful.token');
+      
+      const ui = SwaggerUIBundle({
+        url: '/assets/openapi.yaml',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout",
+        requestInterceptor: (request) => {
+          // Auto-inject token if available
+          if (token && !request.headers['Authorization']) {
+            request.headers['Authorization'] = `Bearer ${token}`;
+          }
+          return request;
+        },
+        onComplete: () => {
+          // Pre-authorize if token exists
+          if (token) {
+            ui.preauthorizeApiKey('BearerAuth', `Bearer ${token}`);
+          }
+        }
+      });
+      
+      window.ui = ui;
+    };
+  </script>
+</body>
+</html>
