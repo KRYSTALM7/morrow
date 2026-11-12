@@ -83,129 +83,288 @@ class FinanceStore:
 
     def _migrate(self):
         with self._lock, closing(self._connect()) as db:
+            is_postgres = get_database_config()['type'] == 'postgresql'
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE IF NOT EXISTS finance_schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+            # On PostgreSQL (autocommit=False) the CREATE TABLE above sits in an implicit
+            # transaction that the subsequent BEGIN IMMEDIATE would roll back via conn.rollback().
+            # Commit it now so the migrations table persists.  On SQLite this is a no-op.
+            if is_postgres:
+                db.execute("COMMIT")
             version = db.execute("SELECT COALESCE(MAX(version), 0) FROM finance_schema_migrations").fetchone()[0]
             if version < 1:
-                db.executescript("""
-                    CREATE TABLE commitments (
-                      commitment_id TEXT PRIMARY KEY,
-                      owner_user_id TEXT NOT NULL,
-                      title TEXT NOT NULL,
-                      category TEXT NOT NULL,
-                      amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
-                      currency TEXT NOT NULL CHECK(length(currency) = 3),
-                      frequency TEXT NOT NULL CHECK(frequency IN ('weekly','monthly','annual','custom')),
-                      interval_days INTEGER,
-                      schedule_anchor_date TEXT NOT NULL,
-                      series_start_number INTEGER NOT NULL DEFAULT 1,
-                      status TEXT NOT NULL CHECK(status IN ('active','paused','cancelled')),
-                      created_at TEXT NOT NULL,
-                      updated_at TEXT NOT NULL,
-                      version INTEGER NOT NULL DEFAULT 1
-                    );
-                    CREATE INDEX commitments_owner_status ON commitments(owner_user_id, status, updated_at DESC);
-                    CREATE TABLE commitment_occurrences (
-                      occurrence_id TEXT PRIMARY KEY,
-                      commitment_id TEXT NOT NULL REFERENCES commitments(commitment_id),
-                      owner_user_id TEXT NOT NULL,
-                      occurrence_number INTEGER NOT NULL CHECK(occurrence_number > 0),
-                      due_date TEXT NOT NULL,
-                      amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
-                      status TEXT NOT NULL CHECK(status IN ('unpaid','paid','paused','cancelled')),
-                      paid_at TEXT,
-                      payment_reference TEXT,
-                      created_at TEXT NOT NULL,
-                      UNIQUE(commitment_id, occurrence_number)
-                    );
-                    CREATE INDEX commitment_occurrences_owner_due ON commitment_occurrences(owner_user_id, due_date, status);
-                    CREATE TABLE shared_expenses (
-                      expense_id TEXT PRIMARY KEY,
-                      owner_user_id TEXT NOT NULL,
-                      description TEXT NOT NULL,
-                      category TEXT NOT NULL,
-                      gross_amount_minor INTEGER NOT NULL CHECK(gross_amount_minor > 0),
-                      personal_share_minor INTEGER NOT NULL CHECK(personal_share_minor >= 0),
-                      currency TEXT NOT NULL CHECK(length(currency) = 3),
-                      created_at TEXT NOT NULL,
-                      updated_at TEXT NOT NULL,
-                      version INTEGER NOT NULL DEFAULT 1
-                    );
-                    CREATE INDEX shared_expenses_owner_created ON shared_expenses(owner_user_id, created_at DESC);
-                    CREATE TABLE shared_expense_shares (
-                      expense_id TEXT NOT NULL REFERENCES shared_expenses(expense_id),
-                      owner_user_id TEXT NOT NULL,
-                      participant_user_id TEXT NOT NULL,
-                      participant_handle TEXT NOT NULL,
-                      share_minor INTEGER NOT NULL CHECK(share_minor > 0),
-                      PRIMARY KEY(expense_id, participant_user_id)
-                    );
-                    CREATE INDEX shared_shares_owner_participant ON shared_expense_shares(owner_user_id, participant_user_id);
-                    CREATE TABLE shared_expense_settlements (
-                      settlement_id TEXT PRIMARY KEY,
-                      expense_id TEXT NOT NULL,
-                      owner_user_id TEXT NOT NULL,
-                      participant_user_id TEXT NOT NULL,
-                      amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
-                      source TEXT NOT NULL CHECK(source IN ('manual','explicitly_reconciled')),
-                      payment_reference TEXT,
-                      actor_user_id TEXT NOT NULL,
-                      created_at TEXT NOT NULL,
-                      FOREIGN KEY(expense_id, participant_user_id)
-                        REFERENCES shared_expense_shares(expense_id, participant_user_id)
-                    );
-                    CREATE INDEX shared_settlements_expense_created ON shared_expense_settlements(owner_user_id, expense_id, created_at);
-                    CREATE TRIGGER shared_settlements_no_update BEFORE UPDATE ON shared_expense_settlements
-                      BEGIN SELECT RAISE(ABORT, 'settlement rows are immutable'); END;
-                    CREATE TABLE finance_idempotency (
-                      owner_user_id TEXT NOT NULL,
-                      operation TEXT NOT NULL,
-                      idempotency_key TEXT NOT NULL,
-                      request_hash TEXT NOT NULL,
-                      response_json TEXT NOT NULL,
-                      created_at TEXT NOT NULL,
-                      PRIMARY KEY(owner_user_id, operation, idempotency_key)
-                    );
-                    CREATE TABLE finance_audit_events (
-                      event_id TEXT PRIMARY KEY,
-                      owner_user_id TEXT NOT NULL,
-                      actor_user_id TEXT NOT NULL,
-                      resource_type TEXT NOT NULL,
-                      resource_id TEXT NOT NULL,
-                      event_type TEXT NOT NULL,
-                      at TEXT NOT NULL,
-                      details_json TEXT NOT NULL
-                    );
-                    CREATE TRIGGER finance_audit_events_no_update BEFORE UPDATE ON finance_audit_events
-                      BEGIN SELECT RAISE(ABORT, 'finance audit events are immutable'); END;
-                """)
-                db.execute("INSERT INTO finance_schema_migrations(version, applied_at) VALUES(1, ?)", (utc_now(),))
+                if is_postgres:
+                    db.execute("BEGIN IMMEDIATE")
+                try:
+                    if is_postgres:
+                        # PostgreSQL-specific DDL.  SQLite triggers use BEGIN...END syntax
+                        # which is invalid on PostgreSQL; we use CREATE OR REPLACE FUNCTION
+                        # + CREATE OR REPLACE TRIGGER instead.
+                        for stmt in [
+                            """CREATE TABLE IF NOT EXISTS commitments (
+                              commitment_id VARCHAR(100) PRIMARY KEY,
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              title VARCHAR(255) NOT NULL,
+                              category VARCHAR(100) NOT NULL,
+                              amount_minor BIGINT NOT NULL CHECK(amount_minor > 0),
+                              currency VARCHAR(3) NOT NULL CHECK(length(currency) = 3),
+                              frequency VARCHAR(20) NOT NULL CHECK(frequency IN ('weekly','monthly','annual','custom')),
+                              interval_days BIGINT,
+                              schedule_anchor_date VARCHAR(10) NOT NULL,
+                              series_start_number BIGINT NOT NULL DEFAULT 1,
+                              status VARCHAR(20) NOT NULL CHECK(status IN ('active','paused','cancelled')),
+                              created_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version BIGINT NOT NULL DEFAULT 1
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS commitments_owner_status ON commitments(owner_user_id, status, updated_at DESC)",
+                            """CREATE TABLE IF NOT EXISTS commitment_occurrences (
+                              occurrence_id VARCHAR(100) PRIMARY KEY,
+                              commitment_id VARCHAR(100) NOT NULL REFERENCES commitments(commitment_id),
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              occurrence_number BIGINT NOT NULL CHECK(occurrence_number > 0),
+                              due_date VARCHAR(10) NOT NULL,
+                              amount_minor BIGINT NOT NULL CHECK(amount_minor > 0),
+                              status VARCHAR(20) NOT NULL CHECK(status IN ('unpaid','paid','paused','cancelled')),
+                              paid_at TEXT,
+                              payment_reference TEXT,
+                              created_at TEXT NOT NULL,
+                              UNIQUE(commitment_id, occurrence_number)
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS commitment_occurrences_owner_due ON commitment_occurrences(owner_user_id, due_date, status)",
+                            """CREATE TABLE IF NOT EXISTS shared_expenses (
+                              expense_id VARCHAR(100) PRIMARY KEY,
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              description TEXT NOT NULL,
+                              category VARCHAR(100) NOT NULL,
+                              gross_amount_minor BIGINT NOT NULL CHECK(gross_amount_minor > 0),
+                              personal_share_minor BIGINT NOT NULL CHECK(personal_share_minor >= 0),
+                              currency VARCHAR(3) NOT NULL CHECK(length(currency) = 3),
+                              created_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version BIGINT NOT NULL DEFAULT 1
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS shared_expenses_owner_created ON shared_expenses(owner_user_id, created_at DESC)",
+                            """CREATE TABLE IF NOT EXISTS shared_expense_shares (
+                              expense_id VARCHAR(100) NOT NULL REFERENCES shared_expenses(expense_id),
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              participant_user_id VARCHAR(100) NOT NULL,
+                              participant_handle VARCHAR(100) NOT NULL,
+                              share_minor BIGINT NOT NULL CHECK(share_minor > 0),
+                              PRIMARY KEY(expense_id, participant_user_id)
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS shared_shares_owner_participant ON shared_expense_shares(owner_user_id, participant_user_id)",
+                            """CREATE TABLE IF NOT EXISTS shared_expense_settlements (
+                              settlement_id VARCHAR(100) PRIMARY KEY,
+                              expense_id VARCHAR(100) NOT NULL,
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              participant_user_id VARCHAR(100) NOT NULL,
+                              amount_minor BIGINT NOT NULL CHECK(amount_minor > 0),
+                              source VARCHAR(50) NOT NULL CHECK(source IN ('manual','explicitly_reconciled')),
+                              payment_reference TEXT,
+                              actor_user_id VARCHAR(100) NOT NULL,
+                              created_at TEXT NOT NULL,
+                              FOREIGN KEY(expense_id, participant_user_id)
+                                REFERENCES shared_expense_shares(expense_id, participant_user_id)
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS shared_settlements_expense_created ON shared_expense_settlements(owner_user_id, expense_id, created_at)",
+                            """CREATE OR REPLACE FUNCTION prevent_settlement_update() RETURNS TRIGGER AS $$
+                            BEGIN
+                                RAISE EXCEPTION 'settlement rows are immutable';
+                            END;
+                            $$ LANGUAGE plpgsql""",
+                            """CREATE OR REPLACE TRIGGER shared_settlements_no_update
+                              BEFORE UPDATE ON shared_expense_settlements
+                              FOR EACH ROW EXECUTE FUNCTION prevent_settlement_update()""",
+                            """CREATE TABLE IF NOT EXISTS finance_idempotency (
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              operation VARCHAR(255) NOT NULL,
+                              idempotency_key VARCHAR(100) NOT NULL,
+                              request_hash VARCHAR(64) NOT NULL,
+                              response_json TEXT NOT NULL,
+                              created_at TEXT NOT NULL,
+                              PRIMARY KEY(owner_user_id, operation, idempotency_key)
+                            )""",
+                            """CREATE TABLE IF NOT EXISTS finance_audit_events (
+                              event_id VARCHAR(100) PRIMARY KEY,
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              actor_user_id VARCHAR(100) NOT NULL,
+                              resource_type VARCHAR(100) NOT NULL,
+                              resource_id VARCHAR(100) NOT NULL,
+                              event_type VARCHAR(100) NOT NULL,
+                              at TEXT NOT NULL,
+                              details_json TEXT NOT NULL
+                            )""",
+                            """CREATE OR REPLACE FUNCTION prevent_audit_event_update() RETURNS TRIGGER AS $$
+                            BEGIN
+                                RAISE EXCEPTION 'finance audit events are immutable';
+                            END;
+                            $$ LANGUAGE plpgsql""",
+                            """CREATE OR REPLACE TRIGGER finance_audit_events_no_update
+                              BEFORE UPDATE ON finance_audit_events
+                              FOR EACH ROW EXECUTE FUNCTION prevent_audit_event_update()""",
+                        ]:
+                            db.execute(stmt)
+                    else:
+                        db.executescript("""
+                            CREATE TABLE commitments (
+                              commitment_id TEXT PRIMARY KEY,
+                              owner_user_id TEXT NOT NULL,
+                              title TEXT NOT NULL,
+                              category TEXT NOT NULL,
+                              amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                              currency TEXT NOT NULL CHECK(length(currency) = 3),
+                              frequency TEXT NOT NULL CHECK(frequency IN ('weekly','monthly','annual','custom')),
+                              interval_days INTEGER,
+                              schedule_anchor_date TEXT NOT NULL,
+                              series_start_number INTEGER NOT NULL DEFAULT 1,
+                              status TEXT NOT NULL CHECK(status IN ('active','paused','cancelled')),
+                              created_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version INTEGER NOT NULL DEFAULT 1
+                            );
+                            CREATE INDEX commitments_owner_status ON commitments(owner_user_id, status, updated_at DESC);
+                            CREATE TABLE commitment_occurrences (
+                              occurrence_id TEXT PRIMARY KEY,
+                              commitment_id TEXT NOT NULL REFERENCES commitments(commitment_id),
+                              owner_user_id TEXT NOT NULL,
+                              occurrence_number INTEGER NOT NULL CHECK(occurrence_number > 0),
+                              due_date TEXT NOT NULL,
+                              amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                              status TEXT NOT NULL CHECK(status IN ('unpaid','paid','paused','cancelled')),
+                              paid_at TEXT,
+                              payment_reference TEXT,
+                              created_at TEXT NOT NULL,
+                              UNIQUE(commitment_id, occurrence_number)
+                            );
+                            CREATE INDEX commitment_occurrences_owner_due ON commitment_occurrences(owner_user_id, due_date, status);
+                            CREATE TABLE shared_expenses (
+                              expense_id TEXT PRIMARY KEY,
+                              owner_user_id TEXT NOT NULL,
+                              description TEXT NOT NULL,
+                              category TEXT NOT NULL,
+                              gross_amount_minor INTEGER NOT NULL CHECK(gross_amount_minor > 0),
+                              personal_share_minor INTEGER NOT NULL CHECK(personal_share_minor >= 0),
+                              currency TEXT NOT NULL CHECK(length(currency) = 3),
+                              created_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version INTEGER NOT NULL DEFAULT 1
+                            );
+                            CREATE INDEX shared_expenses_owner_created ON shared_expenses(owner_user_id, created_at DESC);
+                            CREATE TABLE shared_expense_shares (
+                              expense_id TEXT NOT NULL REFERENCES shared_expenses(expense_id),
+                              owner_user_id TEXT NOT NULL,
+                              participant_user_id TEXT NOT NULL,
+                              participant_handle TEXT NOT NULL,
+                              share_minor INTEGER NOT NULL CHECK(share_minor > 0),
+                              PRIMARY KEY(expense_id, participant_user_id)
+                            );
+                            CREATE INDEX shared_shares_owner_participant ON shared_expense_shares(owner_user_id, participant_user_id);
+                            CREATE TABLE shared_expense_settlements (
+                              settlement_id TEXT PRIMARY KEY,
+                              expense_id TEXT NOT NULL,
+                              owner_user_id TEXT NOT NULL,
+                              participant_user_id TEXT NOT NULL,
+                              amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+                              source TEXT NOT NULL CHECK(source IN ('manual','explicitly_reconciled')),
+                              payment_reference TEXT,
+                              actor_user_id TEXT NOT NULL,
+                              created_at TEXT NOT NULL,
+                              FOREIGN KEY(expense_id, participant_user_id)
+                                REFERENCES shared_expense_shares(expense_id, participant_user_id)
+                            );
+                            CREATE INDEX shared_settlements_expense_created ON shared_expense_settlements(owner_user_id, expense_id, created_at);
+                            CREATE TRIGGER shared_settlements_no_update BEFORE UPDATE ON shared_expense_settlements
+                              BEGIN SELECT RAISE(ABORT, 'settlement rows are immutable'); END;
+                            CREATE TABLE finance_idempotency (
+                              owner_user_id TEXT NOT NULL,
+                              operation TEXT NOT NULL,
+                              idempotency_key TEXT NOT NULL,
+                              request_hash TEXT NOT NULL,
+                              response_json TEXT NOT NULL,
+                              created_at TEXT NOT NULL,
+                              PRIMARY KEY(owner_user_id, operation, idempotency_key)
+                            );
+                            CREATE TABLE finance_audit_events (
+                              event_id TEXT PRIMARY KEY,
+                              owner_user_id TEXT NOT NULL,
+                              actor_user_id TEXT NOT NULL,
+                              resource_type TEXT NOT NULL,
+                              resource_id TEXT NOT NULL,
+                              event_type TEXT NOT NULL,
+                              at TEXT NOT NULL,
+                              details_json TEXT NOT NULL
+                            );
+                            CREATE TRIGGER finance_audit_events_no_update BEFORE UPDATE ON finance_audit_events
+                              BEGIN SELECT RAISE(ABORT, 'finance audit events are immutable'); END;
+                        """)
+                    db.execute("INSERT INTO finance_schema_migrations(version, applied_at) VALUES(1, ?)", (utc_now(),))
+                    if is_postgres:
+                        db.execute("COMMIT")
+                except Exception:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
                 version = 1
             if version < 2:
-                db.executescript("""
-                    CREATE TABLE financial_preferences (
-                      owner_user_id TEXT PRIMARY KEY,
-                      savings_target_minor INTEGER NOT NULL DEFAULT 0 CHECK(savings_target_minor >= 0),
-                      safety_buffer_minor INTEGER NOT NULL DEFAULT 0 CHECK(safety_buffer_minor >= 0),
-                      history_coverage_started_at TEXT NOT NULL,
-                      updated_at TEXT NOT NULL,
-                      version INTEGER NOT NULL DEFAULT 1
-                    );
-                    CREATE TABLE forecast_snapshots (
-                      forecast_id TEXT PRIMARY KEY,
-                      owner_user_id TEXT NOT NULL,
-                      period_start TEXT NOT NULL,
-                      period_end TEXT NOT NULL,
-                      calculation_date TEXT NOT NULL,
-                      model_version TEXT NOT NULL,
-                      inputs_json TEXT NOT NULL,
-                      result_json TEXT NOT NULL,
-                      created_at TEXT NOT NULL
-                    );
-                    CREATE INDEX forecast_snapshots_owner_period
-                      ON forecast_snapshots(owner_user_id, period_start, created_at DESC);
-                """)
-                db.execute("INSERT INTO finance_schema_migrations(version, applied_at) VALUES(2, ?)", (utc_now(),))
+                if is_postgres:
+                    db.execute("BEGIN IMMEDIATE")
+                try:
+                    if is_postgres:
+                        for stmt in [
+                            """CREATE TABLE IF NOT EXISTS financial_preferences (
+                              owner_user_id VARCHAR(100) PRIMARY KEY,
+                              savings_target_minor BIGINT NOT NULL DEFAULT 0 CHECK(savings_target_minor >= 0),
+                              safety_buffer_minor BIGINT NOT NULL DEFAULT 0 CHECK(safety_buffer_minor >= 0),
+                              history_coverage_started_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version BIGINT NOT NULL DEFAULT 1
+                            )""",
+                            """CREATE TABLE IF NOT EXISTS forecast_snapshots (
+                              forecast_id VARCHAR(100) PRIMARY KEY,
+                              owner_user_id VARCHAR(100) NOT NULL,
+                              period_start VARCHAR(10) NOT NULL,
+                              period_end VARCHAR(10) NOT NULL,
+                              calculation_date VARCHAR(10) NOT NULL,
+                              model_version VARCHAR(50) NOT NULL,
+                              inputs_json TEXT NOT NULL,
+                              result_json TEXT NOT NULL,
+                              created_at TEXT NOT NULL
+                            )""",
+                            "CREATE INDEX IF NOT EXISTS forecast_snapshots_owner_period ON forecast_snapshots(owner_user_id, period_start, created_at DESC)",
+                        ]:
+                            db.execute(stmt)
+                    else:
+                        db.executescript("""
+                            CREATE TABLE financial_preferences (
+                              owner_user_id TEXT PRIMARY KEY,
+                              savings_target_minor INTEGER NOT NULL DEFAULT 0 CHECK(savings_target_minor >= 0),
+                              safety_buffer_minor INTEGER NOT NULL DEFAULT 0 CHECK(safety_buffer_minor >= 0),
+                              history_coverage_started_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              version INTEGER NOT NULL DEFAULT 1
+                            );
+                            CREATE TABLE forecast_snapshots (
+                              forecast_id TEXT PRIMARY KEY,
+                              owner_user_id TEXT NOT NULL,
+                              period_start TEXT NOT NULL,
+                              period_end TEXT NOT NULL,
+                              calculation_date TEXT NOT NULL,
+                              model_version TEXT NOT NULL,
+                              inputs_json TEXT NOT NULL,
+                              result_json TEXT NOT NULL,
+                              created_at TEXT NOT NULL
+                            );
+                            CREATE INDEX forecast_snapshots_owner_period
+                              ON forecast_snapshots(owner_user_id, period_start, created_at DESC);
+                        """)
+                    db.execute("INSERT INTO finance_schema_migrations(version, applied_at) VALUES(2, ?)", (utc_now(),))
+                    if is_postgres:
+                        db.execute("COMMIT")
+                except Exception:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
 
     @staticmethod
     def _request_hash(payload: dict) -> str:
@@ -560,8 +719,13 @@ class FinanceStore:
     def ensure_financial_preferences(self, owner_user_id, coverage_started_at=None):
         started = coverage_started_at or utc_now()
         with self._lock, closing(self._connect()) as db:
-            db.execute("INSERT OR IGNORE INTO financial_preferences(owner_user_id,history_coverage_started_at,updated_at) VALUES(?,?,?)",
-                       (owner_user_id, started, utc_now()))
+            if self.db_type == 'postgresql':
+                db.execute("""INSERT INTO financial_preferences(owner_user_id,history_coverage_started_at,updated_at) 
+                           VALUES(%s,%s,%s) ON CONFLICT (owner_user_id) DO NOTHING""",
+                           (owner_user_id, started, utc_now()))
+            else:
+                db.execute("INSERT OR IGNORE INTO financial_preferences(owner_user_id,history_coverage_started_at,updated_at) VALUES(?,?,?)",
+                           (owner_user_id, started, utc_now()))
             row = db.execute("SELECT * FROM financial_preferences WHERE owner_user_id=?",
                              (owner_user_id,)).fetchone()
             return dict(row)

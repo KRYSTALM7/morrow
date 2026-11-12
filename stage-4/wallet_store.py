@@ -42,6 +42,11 @@ class WalletStore:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("CREATE TABLE IF NOT EXISTS wallet_schema_migrations "
                        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+            # On PostgreSQL (autocommit=False) the CREATE TABLE above sits in an implicit
+            # transaction that the subsequent BEGIN IMMEDIATE would roll back via conn.rollback().
+            # Commit it now so the migrations table persists.  On SQLite this is a no-op.
+            if self.db_type == 'postgresql':
+                db.execute("COMMIT")
             version = db.execute("SELECT COALESCE(MAX(version),0) FROM wallet_schema_migrations").fetchone()[0]
             if version < 1:
                 db.execute("BEGIN IMMEDIATE")
@@ -66,18 +71,37 @@ class WalletStore:
                     raise
                 version = 1
             if version < 2:
-                db.executescript("""
-                    CREATE TABLE wallet_sessions (
-                      token_hash TEXT PRIMARY KEY,
-                      user_id TEXT NOT NULL,
-                      created_at TEXT NOT NULL,
-                      expires_at TEXT NOT NULL,
-                      revoked_at TEXT
-                    );
-                    CREATE INDEX wallet_sessions_owner_expiry ON wallet_sessions(user_id,expires_at);
-                """)
-                db.execute("INSERT INTO wallet_schema_migrations(version,applied_at) VALUES(2,?)",
-                           (utc_now(),))
+                if self.db_type == 'postgresql':
+                    db.execute("BEGIN IMMEDIATE")
+                try:
+                    if self.db_type == 'postgresql':
+                        db.execute("""CREATE TABLE IF NOT EXISTS wallet_sessions (
+                          token_hash VARCHAR(64) PRIMARY KEY,
+                          user_id VARCHAR(100) NOT NULL,
+                          created_at TEXT NOT NULL,
+                          expires_at TEXT NOT NULL,
+                          revoked_at TEXT
+                        )""")
+                        db.execute("CREATE INDEX IF NOT EXISTS wallet_sessions_owner_expiry ON wallet_sessions(user_id,expires_at)")
+                    else:
+                        db.executescript("""
+                            CREATE TABLE wallet_sessions (
+                              token_hash TEXT PRIMARY KEY,
+                              user_id TEXT NOT NULL,
+                              created_at TEXT NOT NULL,
+                              expires_at TEXT NOT NULL,
+                              revoked_at TEXT
+                            );
+                            CREATE INDEX wallet_sessions_owner_expiry ON wallet_sessions(user_id,expires_at);
+                        """)
+                    db.execute("INSERT INTO wallet_schema_migrations(version,applied_at) VALUES(2,?)",
+                               (utc_now(),))
+                    if self.db_type == 'postgresql':
+                        db.execute("COMMIT")
+                except Exception:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
                 version = 2
             if version < 3:
                 # Migrate the legacy token map into hash-only sessions and scrub the
@@ -95,9 +119,14 @@ class WalletStore:
                             current = datetime.now(timezone.utc)
                             expiry = (current + timedelta(days=30)).isoformat()
                             for token, user_id in tokens.items():
-                                db.execute("""INSERT OR IGNORE INTO wallet_sessions
-                                    (token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)""",
-                                           (self.token_hash(token), user_id, current.isoformat(), expiry))
+                                if self.db_type == 'postgresql':
+                                    db.execute("""INSERT INTO wallet_sessions
+                                        (token_hash,user_id,created_at,expires_at) VALUES(%s,%s,%s,%s) ON CONFLICT (token_hash) DO NOTHING""",
+                                               (self.token_hash(token), user_id, current.isoformat(), expiry))
+                                else:
+                                    db.execute("""INSERT OR IGNORE INTO wallet_sessions
+                                        (token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)""",
+                                               (self.token_hash(token), user_id, current.isoformat(), expiry))
                             db.execute("UPDATE wallet_state SET state_json=?,updated_at=? WHERE singleton=1",
                                        (self._encode(state), utc_now()))
                         db.execute("INSERT INTO wallet_schema_migrations(version,applied_at) VALUES(3,?)",
@@ -111,11 +140,14 @@ class WalletStore:
             if version < 4:
                 # Keep a separate completion marker so an interrupted scrub is
                 # retried at startup before any wallet session is served.
-                if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-                    raise RuntimeError("Could not checkpoint wallet WAL during token migration")
-                db.execute("VACUUM")
-                if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-                    raise RuntimeError("Could not truncate wallet WAL after token migration")
+                # On PostgreSQL the WAL checkpoint and VACUUM steps are not applicable;
+                # just record the version marker.
+                if self.db_type == 'sqlite':
+                    if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                        raise RuntimeError("Could not checkpoint wallet WAL during token migration")
+                    db.execute("VACUUM")
+                    if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                        raise RuntimeError("Could not truncate wallet WAL after token migration")
                 db.execute("BEGIN IMMEDIATE")
                 try:
                     current_version = db.execute(
@@ -213,7 +245,8 @@ class WalletStore:
                     raise
                 version = 6
         try:
-            os.chmod(self.path, 0o600)
+            if self.path is not None:
+                os.chmod(self.path, 0o600)
         except OSError:
             pass
 
@@ -338,8 +371,13 @@ class WalletStore:
         row = db.execute("SELECT window_started,attempts FROM wallet_auth_attempts WHERE bucket_hash=?",
                          (key,)).fetchone()
         if row is None or now - row["window_started"] >= window_seconds:
-            db.execute("INSERT OR REPLACE INTO wallet_auth_attempts VALUES(?,?,1,?)",
-                       (key, now, utc_now()))
+            if self.db_type == 'postgresql':
+                db.execute("""INSERT INTO wallet_auth_attempts (bucket_hash,window_started,attempts,updated_at) 
+                           VALUES(%s,%s,1,%s) ON CONFLICT (bucket_hash) DO UPDATE SET window_started=%s,attempts=1,updated_at=%s""",
+                           (key, now, utc_now(), now, utc_now()))
+            else:
+                db.execute("INSERT OR REPLACE INTO wallet_auth_attempts VALUES(?,?,1,?)",
+                           (key, now, utc_now()))
         else:
             db.execute("UPDATE wallet_auth_attempts SET attempts=attempts+1,updated_at=? WHERE bucket_hash=?",
                        (utc_now(), key))
