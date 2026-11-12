@@ -8,6 +8,7 @@ services:
     env: python
     region: oregon
     plan: free  # FREE tier
+    rootDirectory: stage-4  # CRITICAL: All Python modules are in stage-4/
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python app.py"
     healthCheckPath: /health
@@ -36,6 +37,7 @@ services:
   - type: web
     name: morrow-frontend
     env: static
+    rootDirectory: stage-4  # Frontend files are also in stage-4/
     buildCommand: "echo 'No build required'"
     staticPublishPath: ./web
     routes:
