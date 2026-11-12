@@ -451,7 +451,17 @@ class WalletStore:
 
     def health(self):
         with self._lock, closing(self._connect()) as db:
-            integrity = db.execute("PRAGMA quick_check").fetchone()[0]
+            # Database integrity check: SQLite uses PRAGMA quick_check, PostgreSQL uses SELECT 1
+            if self.db_type == 'sqlite':
+                integrity = db.execute("PRAGMA quick_check").fetchone()[0]
+            else:
+                # PostgreSQL: verify connection with a simple query
+                try:
+                    db.execute("SELECT 1").fetchone()
+                    integrity = "ok"
+                except Exception:
+                    integrity = "error"
+            
             version = db.execute("SELECT COALESCE(MAX(version),0) FROM wallet_schema_migrations").fetchone()[0]
             initialized = db.execute("SELECT 1 FROM wallet_state WHERE singleton=1").fetchone() is not None
             return {"status": "ok" if integrity == "ok" and version >= 1 and initialized else "error",
