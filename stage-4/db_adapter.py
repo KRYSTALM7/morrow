@@ -20,6 +20,7 @@ def get_connection(store_name=None, sqlite_path=None):
     
     Returns either a SQLite connection or a PostgreSQL connection wrapper.
     Both support the same interface: execute(), fetchone(), fetchall(), close()
+    Both support row[0] integer indexing and row["column"] name indexing.
     """
     config = get_database_config()
     
@@ -40,7 +41,8 @@ def get_connection(store_name=None, sqlite_path=None):
         if not PSYCOPG2_AVAILABLE:
             raise RuntimeError("psycopg2-binary required. Install: pip install psycopg2-binary")
         
-        conn = psycopg2.connect(config['url'], cursor_factory=psycopg2.extras.RealDictCursor)
+        # Use DictCursor instead of RealDictCursor for integer index compatibility
+        conn = psycopg2.connect(config['url'], cursor_factory=psycopg2.extras.DictCursor)
         conn.autocommit = False
         return PostgreSQLConnection(conn)
 
@@ -107,14 +109,16 @@ class PostgreSQLConnection:
     def fetchone(self):
         try:
             row = self.cursor.fetchone()
-            return dict(row) if row else None
+            # DictCursor returns rows that support both row[0] and row["column"]
+            return row
         except psycopg2.ProgrammingError:
             return None
     
     def fetchall(self):
         try:
             rows = self.cursor.fetchall()
-            return [dict(r) for r in rows] if rows else []
+            # DictCursor returns rows that support both row[0] and row["column"]
+            return rows if rows else []
         except psycopg2.ProgrammingError:
             return []
     
